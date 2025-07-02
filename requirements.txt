@@ -1,0 +1,12 @@
+alpaca-trade-api
+binance
+requests
+stable-baselines3
+gym
+xgboost
+shap
+joblib
+streamlit
+pyyaml
+pandas
+numpy
