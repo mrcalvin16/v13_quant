@@ -1,6 +1,6 @@
 alpaca:
-  key_id: "YOUR_ALPACA_KEY"
-  secret_key: "YOUR_ALPACA_SECRET"
+  key_id: "PK749QEISG5XKJ2M7BE6"
+  secret_key: "q9WUen6lremQnKlOkCg05Rzsz9dcX8A8yFBe9Do1"
   base_url: "https://paper-api.alpaca.markets"
 
 binance:
