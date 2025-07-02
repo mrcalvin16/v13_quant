@@ -1,5 +1,6 @@
 alpaca-trade-api
-binance
+python-binance
+ccxt
 requests
 stable-baselines3
 gym
@@ -10,3 +11,4 @@ streamlit
 pyyaml
 pandas
 numpy
+cryptography
