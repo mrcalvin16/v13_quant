@@ -4,8 +4,8 @@ alpaca:
   base_url: "https://paper-api.alpaca.markets"
 
 binance:
-  api_key: "YOUR_BINANCE_KEY"
-  api_secret: "YOUR_BINANCE_SECRET"
+  api_key: "pCXCN5WRUYVZC9pnSZ7pWbhusJTNkOhsYDQxZly3EpWIuqmZQlQmbe3JMJywVl7r"
+  api_secret: "CxQQvsgG72yoPHc2cd4WGHJ44KeyIBdbc7xQHtMbDa4UICk6VSrfHS79MTTvZzE2"
 
 tradier:
   access_token: "YOUR_TRADIER_TOKEN"
