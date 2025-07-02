@@ -1,0 +1,25 @@
+alpaca:
+  key_id: "YOUR_ALPACA_KEY"
+  secret_key: "YOUR_ALPACA_SECRET"
+  base_url: "https://paper-api.alpaca.markets"
+
+binance:
+  api_key: "YOUR_BINANCE_KEY"
+  api_secret: "YOUR_BINANCE_SECRET"
+
+tradier:
+  access_token: "YOUR_TRADIER_TOKEN"
+
+assets:
+  AAPL:
+    type: equity
+    strategy: rl_agent
+    lot: 2000
+  BTCUSD:
+    type: crypto
+    strategy: momentum
+    lot: 5000
+  SPY_20230915_400_C:
+    type: option
+    strategy: ml_ensemble
+    lot: 1
