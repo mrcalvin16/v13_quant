@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 from prediction.ml_ensemble import MLEnsemble
 from prediction.rl_agent import RLAgent
 from prediction.ensemble_manager import EnsembleManager
@@ -11,63 +10,55 @@ from simulation.simulator import Simulator
 # Initialize modules
 ml_model = MLEnsemble()
 rl_agent = RLAgent()
-ensemble = EnsembleManager(
-    ml_model=ml_model,
-    rl_model=rl_agent,
-    weight_rl=0.4
-)
+ensemble = EnsembleManager(ml_model=ml_model, rl_model=rl_agent, weight_rl=0.4)
+
 equities_exec = EquitiesExecutor()
-crypto_exec = CryptoExecutor(config={})
-options_exec = OptionsExecutor(config={"access_token": "dummy_token"})
-simulator = Simulator()
+crypto_exec = CryptoExecutor(config={"api_key": "your_key", "api_secret": "your_secret"})
+options_exec = OptionsExecutor(config={"access_token": "your_token"})
+simulator = Simulator(config={"mode": "test"})
 
 # Streamlit UI
-st.set_page_config(page_title="🚀 V13 Quant System", layout="wide")
+st.set_page_config(page_title="V13 Quant System", layout="wide")
 st.title("🚀 V13 Quant System")
-st.success("✅ App initialized successfully!")
+st.success("✅ All modules initialized successfully!")
 
-# Module status
-st.subheader("Module Status")
-cols = st.columns(3)
-cols[0].info("ML Model: Ready")
-cols[1].info("RL Agent: Ready")
-cols[2].info("Ensemble Manager: Ready")
+st.header("Modules Status")
+st.info("ML prediction module: Ready")
+st.info("RL agent module: Ready")
+st.info("Ensemble manager: Ready")
+st.info("Equities trading module: Ready")
+st.info("Crypto trading module: Ready")
+st.info("Options trading module: Ready")
+st.info("Simulator: Ready")
 
-# Safety confirmation
-st.warning("⚠️ **Important:** This platform can execute real trades. Confirm below before enabling execution.")
-confirm = st.checkbox("I understand the risks and want to enable live trading.")
-if confirm:
-    st.success("✅ Live trading is ENABLED.")
-else:
-    st.error("🚫 Live trading is DISABLED. Simulation mode only.")
+st.header("Example Performance Metrics")
+performance_data = {
+    "Metric": ["Sharpe Ratio", "Win Rate", "Max Drawdown"],
+    "Value": ["1.42", "62%", "-12%"]
+}
+st.table(performance_data)
 
-# Example prediction
-st.subheader("Example Prediction")
-ml_input = [[0.2, 0.4, 0.6]]
+st.header("Signal Blending Example")
+ml_input = [[0.3, 0.7]]
 rl_obs = [0.1, 0.05]
 prediction = ensemble.predict(ml_input, rl_obs)
-st.write(f"Blended prediction: **{prediction:.4f}**")
+st.write(f"Blended prediction output: `{prediction}`")
 
-# Simple threshold logic
-if prediction > 0.5 and confirm:
-    st.success("📈 Signal: BUY")
-    equities_exec.submit_order(symbol="AAPL", quantity=1, side="buy")
-else:
-    st.info("No trade action triggered.")
+# Safety confirmation before trading
+if st.button("🚨 Execute Equities Trade (TEST MODE)"):
+    result = equities_exec.submit_order(symbol="AAPL", qty=1, side="buy")
+    st.success(f"Equities trade executed: {result}")
 
-# Example performance metrics
-st.subheader("Example Performance Metrics")
-metrics_df = pd.DataFrame({
-    "Metric": ["Sharpe Ratio", "Win Rate", "Max Drawdown"],
-    "Value": [1.42, 62, -12]
-})
-st.table(metrics_df)
+if st.button("🚨 Execute Crypto Trade (TEST MODE)"):
+    result = crypto_exec.submit_order(symbol="BTCUSDT", qty=0.01, side="buy")
+    st.success(f"Crypto trade executed: {result}")
 
-# Example signal chart
-st.subheader("Example Signal Chart")
-chart_data = pd.DataFrame({
-    "Signal": [10, 12, 9, 15, 14]
-})
-st.line_chart(chart_data)
+if st.button("🚨 Execute Options Trade (TEST MODE)"):
+    result = options_exec.submit_order(symbol="AAPL_202501_C150", qty=1, side="buy")
+    st.success(f"Options trade executed: {result}")
 
-st.caption("© V13 Quant System — for research and educational purposes only.")
+if st.button("Run Simulation"):
+    sim_result = simulator.run()
+    st.json(sim_result)
+
+st.caption("All trades are currently in TEST MODE. Update config dictionaries with real credentials for live trading.")
