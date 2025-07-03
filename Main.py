@@ -1,158 +1,73 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-
 from prediction.ml_ensemble import MLEnsemble
 from prediction.rl_agent import RLAgent
 from prediction.ensemble_manager import EnsembleManager
 from execution.equities import EquitiesExecutor
 from execution.crypto import CryptoExecutor
-
-# Initialize session state
-if "positions" not in st.session_state:
-    st.session_state.positions = {"AAPL": 0, "BTCUSDT": 0}
-if "trade_log" not in st.session_state:
-    st.session_state.trade_log = []
+from execution.options import OptionsExecutor
+from simulation.simulator import Simulator
 
 # Initialize modules
 ml_model = MLEnsemble()
 rl_agent = RLAgent()
-ensemble = EnsembleManager(weight_rl=0.4)
-
+ensemble = EnsembleManager(
+    ml_model=ml_model,
+    rl_model=rl_agent,
+    weight_rl=0.4
+)
 equities_exec = EquitiesExecutor()
 crypto_exec = CryptoExecutor()
+options_exec = OptionsExecutor()
+simulator = Simulator()
 
-# Layout
-st.set_page_config(
-    page_title="🚀 V13 Quant System",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
+# Streamlit UI
+st.set_page_config(page_title="🚀 V13 Quant System", layout="wide")
 st.title("🚀 V13 Quant System")
-st.success("✅ This app has successfully deployed!")
+st.success("✅ App initialized successfully!")
 
 # Module status
-st.subheader("Modules Status")
-st.info("ML prediction module: Ready")
-st.info("Crypto trading module: Ready")
-st.info("Equities trading module: Ready")
+st.subheader("Module Status")
+cols = st.columns(3)
+cols[0].info("ML Model: Ready")
+cols[1].info("RL Agent: Ready")
+cols[2].info("Ensemble Manager: Ready")
 
-# Example metrics
+# Safety confirmation
+st.warning("⚠️ **Important:** This platform can execute real trades. Confirm below before enabling execution.")
+confirm = st.checkbox("I understand the risks and want to enable live trading.")
+if confirm:
+    st.success("✅ Live trading is ENABLED.")
+else:
+    st.error("🚫 Live trading is DISABLED. Simulation mode only.")
+
+# Example prediction
+st.subheader("Example Prediction")
+ml_input = [[0.2, 0.4, 0.6]]
+rl_obs = [0.1, 0.05]
+prediction = ensemble.predict(ml_input, rl_obs)
+st.write(f"Blended prediction: **{prediction:.4f}**")
+
+# Simple threshold logic
+if prediction > 0.5 and confirm:
+    st.success("📈 Signal: BUY")
+    equities_exec.submit_order(symbol="AAPL", quantity=1, side="buy")
+else:
+    st.info("No trade action triggered.")
+
+# Example performance metrics
 st.subheader("Example Performance Metrics")
-metrics = pd.DataFrame({
+metrics_df = pd.DataFrame({
     "Metric": ["Sharpe Ratio", "Win Rate", "Max Drawdown"],
-    "Value": ["1.42", "62%", "-12%"]
+    "Value": [1.42, 62, -12]
 })
-st.dataframe(metrics)
+st.table(metrics_df)
 
-# Example chart
+# Example signal chart
 st.subheader("Example Signal Chart")
-st.line_chart([10, 12, 9, 14, 15])
+chart_data = pd.DataFrame({
+    "Signal": [10, 12, 9, 15, 14]
+})
+st.line_chart(chart_data)
 
-# Simulated prices (replace with real API)
-btc_price = 58000
-aapl_price = 190
-
-st.markdown("---")
-st.subheader("💼 Portfolio Overview")
-btc_pos = st.session_state.positions["BTCUSDT"]
-aapl_pos = st.session_state.positions["AAPL"]
-
-st.write(f"BTC Position: {btc_pos} units (${btc_pos * btc_price:,.2f})")
-st.write(f"AAPL Position: {aapl_pos} units (${aapl_pos * aapl_price:,.2f})")
-
-st.markdown("---")
-
-# Trade controls
-st.subheader("Trade Controls")
-col1, col2 = st.columns(2)
-
-with col1:
-    sim_mode = st.checkbox("✅ Simulation Mode (Recommended)", value=True)
-    confirm_live = st.checkbox("⚠️ I confirm I want to place real trades")
-
-if not sim_mode:
-    st.error("⚠️ Simulation Mode is OFF. You are in LIVE TRADING mode!")
-
-timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-col_buy_aapl, col_buy_btc = st.columns(2)
-
-with col_buy_aapl:
-    if st.button("Buy AAPL", disabled=(not sim_mode and not confirm_live)):
-        if sim_mode:
-            st.success("Simulated AAPL buy.")
-            st.session_state.positions["AAPL"] += 10
-            st.session_state.trade_log.append({
-                "Time": timestamp,
-                "Asset": "AAPL",
-                "Qty": 10,
-                "Side": "Buy",
-                "Price": aapl_price,
-                "Mode": "Simulated"
-            })
-        else:
-            order = equities_exec.submit_order("AAPL", qty=10, side="buy")
-            st.success(f"Live order submitted: {order}")
-            st.session_state.positions["AAPL"] += 10
-            st.session_state.trade_log.append({
-                "Time": timestamp,
-                "Asset": "AAPL",
-                "Qty": 10,
-                "Side": "Buy",
-                "Price": aapl_price,
-                "Mode": "Live"
-            })
-
-with col_buy_btc:
-    if st.button("Buy BTC", disabled=(not sim_mode and not confirm_live)):
-        if sim_mode:
-            st.success("Simulated BTC buy.")
-            st.session_state.positions["BTCUSDT"] += 0.01
-            st.session_state.trade_log.append({
-                "Time": timestamp,
-                "Asset": "BTCUSDT",
-                "Qty": 0.01,
-                "Side": "Buy",
-                "Price": btc_price,
-                "Mode": "Simulated"
-            })
-        else:
-            order = crypto_exec.submit_order("BTCUSDT", qty=0.01, side="buy")
-            st.success(f"Live order submitted: {order}")
-            st.session_state.positions["BTCUSDT"] += 0.01
-            st.session_state.trade_log.append({
-                "Time": timestamp,
-                "Asset": "BTCUSDT",
-                "Qty": 0.01,
-                "Side": "Buy",
-                "Price": btc_price,
-                "Mode": "Live"
-            })
-
-# Trade history
-if st.session_state.trade_log:
-    st.subheader("📜 Trade History")
-    df_trades = pd.DataFrame(st.session_state.trade_log)
-
-    def compute_pnl(row):
-        mark = btc_price if row["Asset"] == "BTCUSDT" else aapl_price
-        if row["Side"] == "Buy":
-            return (mark - row["Price"]) * row["Qty"]
-        else:
-            return (row["Price"] - mark) * row["Qty"]
-
-    df_trades["Unrealized P&L"] = df_trades.apply(compute_pnl, axis=1)
-    df_trades["Cumulative P&L"] = df_trades["Unrealized P&L"].cumsum()
-
-    st.dataframe(df_trades)
-    st.line_chart(df_trades["Cumulative P&L"])
-
-    csv = df_trades.to_csv(index=False).encode()
-    st.download_button(
-        label="📥 Download Trade Log",
-        data=csv,
-        file_name="trade_log.csv",
-        mime="text/csv"
-    )
+st.caption("© V13 Quant System — for research and educational purposes only.")
