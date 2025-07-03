@@ -11,89 +11,79 @@ from simulation.simulator import Simulator
 # Initialize models
 ml_model = MLEnsemble()
 rl_agent = RLAgent()
-ensemble = EnsembleManager(ml_model=ml_model, rl_model=rl_agent, weight_rl=0.4)
 
-# Initialize executors with safe credentials
-equities_exec = EquitiesExecutor()
+ensemble = EnsembleManager(
+    ml_model=ml_model,
+    rl_model=rl_agent,
+    weight_rl=0.4
+)
 
+# Initialize executors using Streamlit secrets
 crypto_exec = CryptoExecutor(config={
-    "api_key": st.secrets["pCXCN5WRUYVZC9pnSZ7pWbhusJTNkOhsYDQxZly3EpWIuqmZQlQmbe3JMJywVl7r"],
-    "api_secret": st.secrets["CxQQvsgG72yoPHc2cd4WGHJ44KeyIBdbc7xQHtMbDa4UICk6VSrfHS79MTTvZzE2"]
+    "api_key": st.secrets["BINANCE_API_KEY"],
+    "api_secret": st.secrets["BINANCE_SECRET_KEY"]
 })
 
 options_exec = OptionsExecutor(config={
-    "access_token": st.secrets.get("TRADIER_ACCESS_TOKEN", "dummy_token")
+    "access_token": st.secrets["TRADIER_ACCESS_TOKEN"]
 })
 
-# Initialize simulator
+equities_exec = EquitiesExecutor()
 simulator = Simulator()
 
 # Streamlit UI
 st.set_page_config(page_title="V13 Quant System", layout="wide")
 
 st.title("🚀 V13 Quant System")
-st.success("✅ All modules initialized successfully!")
+st.success("✅ App loaded successfully.")
 
-# Module status
 st.subheader("Modules Status")
-cols = st.columns(3)
-cols[0].info("ML Model: Ready")
-cols[1].info("RL Agent: Ready")
-cols[2].info("Ensemble Manager: Ready")
-st.info("Equities Trading Module: Ready")
+st.info("ML Prediction Module: Ready")
+st.info("RL Agent Module: Ready")
 st.info("Crypto Trading Module: Ready")
 st.info("Options Trading Module: Ready")
-st.info("Simulator Module: Ready")
+st.info("Equities Trading Module: Ready")
 
-# Example metrics
+# Example Metrics
 st.subheader("Example Performance Metrics")
-metrics_df = pd.DataFrame({
+metrics_data = {
     "Metric": ["Sharpe Ratio", "Win Rate", "Max Drawdown"],
     "Value": [1.42, "62%", "-12%"]
-})
-st.table(metrics_df)
+}
+df_metrics = pd.DataFrame(metrics_data)
+st.table(df_metrics)
 
-# Example blended prediction
-st.subheader("Signal Blending Example")
-ml_input = [[0.3, 0.7]]
-rl_obs = [0.1, 0.05]
-prediction = ensemble.predict(ml_input, rl_obs)
-st.write(f"Blended prediction: `{prediction}`")
+# Example blended signal chart
+st.subheader("Example Signal Chart")
+example_signal = pd.Series([10, 12, 9, 14, 15, 13])
+st.line_chart(example_signal)
 
-# Safety confirmation
-st.subheader("Trading Controls")
-sim_mode = st.checkbox("✅ Simulation Mode (Recommended)", value=True)
-confirm_live = st.checkbox("⚠️ I confirm I want to place live trades")
+# Trade Execution Buttons with safety confirmation
+st.subheader("Trade Execution")
+if st.button("Submit Test Order (Simulation Only)"):
+    with st.spinner("Submitting test order..."):
+        result = simulator.run()
+    st.success(f"Simulation Result: {result}")
 
-if not sim_mode:
-    st.error("⚠️ Simulation Mode is OFF! You must confirm above to place real trades.")
+if st.button("Submit Real Crypto Order (Binance)"):
+    confirm = st.radio("Are you sure you want to submit a live Binance order?", ["No", "Yes"])
+    if confirm == "Yes":
+        with st.spinner("Submitting live Binance order..."):
+            response = crypto_exec.submit_order(symbol="BTCUSDT", qty=0.001, side="buy")
+        st.success(f"Binance Order Response: {response}")
 
-# Trading action buttons
-col1, col2, col3 = st.columns(3)
+if st.button("Submit Real Equities Order"):
+    confirm = st.radio("Are you sure you want to submit a live Equities order?", ["No", "Yes"])
+    if confirm == "Yes":
+        with st.spinner("Submitting live Equities order..."):
+            response = equities_exec.submit_order(symbol="AAPL", qty=1, side="buy")
+        st.success(f"Equities Order Response: {response}")
 
-if col1.button("Run Simulation"):
-    result = simulator.run()
-    st.write(result)
+if st.button("Submit Real Options Order"):
+    confirm = st.radio("Are you sure you want to submit a live Options order?", ["No", "Yes"])
+    if confirm == "Yes":
+        with st.spinner("Submitting live Options order..."):
+            response = options_exec.submit_order(symbol="AAPL_20240119C150", qty=1, side="buy")
+        st.success(f"Options Order Response: {response}")
 
-if col2.button("Submit Crypto Test Order", disabled=(not sim_mode and not confirm_live)):
-    if sim_mode:
-        st.success("Simulated Crypto order.")
-    else:
-        order = crypto_exec.submit_order(symbol="BTCUSDT", qty=0.01, side="buy")
-        st.success(f"Live Crypto order placed: {order}")
-
-if col3.button("Submit Equities Test Order", disabled=(not sim_mode and not confirm_live)):
-    if sim_mode:
-        st.success("Simulated Equities order.")
-    else:
-        order = equities_exec.submit_order(symbol="AAPL", qty=1, side="buy")
-        st.success(f"Live Equities order placed: {order}")
-
-if st.button("Submit Options Test Order", disabled=(not sim_mode and not confirm_live)):
-    if sim_mode:
-        st.success("Simulated Options order.")
-    else:
-        order = options_exec.submit_order(symbol="AAPL_20240719_150_C", qty=1, side="buy")
-        st.success(f"Live Options order placed: {order}")
-
-st.caption("✅ All trades default to simulation mode unless explicitly confirmed.")
+st.caption("Use at your own risk. This is a prototype.")
