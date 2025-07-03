@@ -2,6 +2,17 @@ import streamlit as st
 import logging
 import pandas as pd
 
+# Import your modules
+from prediction.ml_ensemble import MLEnsemble
+from prediction.rl_agent import RLAgent
+from prediction.ensemble_manager import EnsembleManager
+from execution.equities import EquitiesExecutor
+from execution.crypto import CryptoExecutor
+from execution.options import OptionsExecutor
+from simulation.simulator import Simulator
+from explainability.shap_explainer import ShapExplainer
+from interface.copilot import Copilot
+
 # Configure logger
 logger = logging.getLogger("V13Main")
 logging.basicConfig(
@@ -10,25 +21,39 @@ logging.basicConfig(
 )
 
 def main():
-    # Streamlit UI
     st.set_page_config(
         page_title="V13 Quant App",
         layout="wide"
     )
 
     st.title("🚀 V13 Quant System")
-    st.write("✅ This app has successfully deployed!")
+    st.write("✅ This app has successfully deployed with all modules initialized!")
 
-    # Example placeholder sections
+    # Initialize modules
+    ml_ensemble = MLEnsemble()
+    rl_agent = RLAgent()
+    ensemble_manager = EnsembleManager(weight_rl=0.5)
+    equities_exec = EquitiesExecutor()
+    crypto_exec = CryptoExecutor()
+    options_exec = OptionsExecutor()
+    simulator = Simulator()
+    explainer = ShapExplainer()
+    copilot = Copilot()
+
     st.subheader("Modules Status")
-    st.info("ML prediction module: Ready")
-    st.info("Crypto trading module: Not initialized")
-    st.info("Equities trading module: Not initialized")
+    st.success("✅ ML Ensemble: Initialized")
+    st.success("✅ RL Agent: Initialized")
+    st.success("✅ Ensemble Manager: Initialized")
+    st.success("✅ Equities Executor: Initialized")
+    st.success("✅ Crypto Executor: Initialized")
+    st.success("✅ Options Executor: Initialized")
+    st.success("✅ Simulator: Initialized")
+    st.success("✅ SHAP Explainer: Initialized")
+    st.success("✅ Copilot: Initialized")
 
-    # Example log
-    logger.info("App loaded successfully and UI rendered.")
+    logger.info("All modules initialized successfully.")
 
-    # Fixed: make all entries strings to avoid PyArrow error
+    # Example Performance Table
     data = pd.DataFrame({
         "Metric": ["Sharpe Ratio", "Win Rate", "Max Drawdown"],
         "Value": ["1.42", "62%", "-12%"]
@@ -36,14 +61,14 @@ def main():
     st.subheader("Example Performance Metrics")
     st.table(data)
 
-    # Example placeholder chart
+    # Example chart
     st.subheader("Example Signal Chart")
     st.line_chart([10, 12, 9, 14, 15, 12])
 
-    # You can later integrate your trading logic here
-    # For example:
+    # Placeholder: Run prediction logic here when ready
     # ml_input = ...
-    # prediction = ensemble.predict(ml_input, rl_obs)
+    # rl_obs = ...
+    # prediction = ensemble_manager.predict(ml_input, rl_obs)
     # st.write(f"Prediction: {prediction}")
 
 if __name__ == "__main__":
