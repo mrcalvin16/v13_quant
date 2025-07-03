@@ -11,3 +11,5 @@ pyyaml
 pandas
 numpy
 cryptography
+scikit-learn
+yfinance
