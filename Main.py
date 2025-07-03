@@ -18,7 +18,7 @@ ensemble = EnsembleManager(
 )
 equities_exec = EquitiesExecutor()
 crypto_exec = CryptoExecutor(config={})
-options_exec = OptionsExecutor()
+options_exec = OptionsExecutor(config={})
 simulator = Simulator()
 
 # Streamlit UI
