@@ -1,5 +1,15 @@
-# Dummy training data
-X_train = [[0,0,0],[1,1,1]]
-y_train = [0,1]
+class MLEnsemble:
+    def __init__(self):
+        self.model = None
 
-ml.train(X_train, y_train)
+    def train(self, X_train, y_train):
+        pass
+
+    def predict(self, X):
+        return [0.5]  # Dummy output
+
+    def save(self, path):
+        pass
+
+    def load(self, path):
+        pass
