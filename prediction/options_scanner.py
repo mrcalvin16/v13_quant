@@ -1,67 +1,59 @@
 import yfinance as yf
 
 class OptionsAnalyzer:
-    def __init__(self):
-        pass
-
     def get_recommendations(
-        self, symbol,
-        min_oi=500,
-        min_volume=250,
-        min_iv=0.2,
-        max_iv=0.6,
-        max_spread=0.25,
-        min_days=7,
-        max_days=45,
-        min_delta=0.3,
-        max_delta=0.7,
-        scoring_weights=None
+        self, symbol, min_oi=100, min_volume=50,
+        min_iv=0.2, max_iv=0.6, max_spread=0.25, scoring_weights=None
     ):
-        ticker = yf.Ticker(symbol)
-        expirations = ticker.options
+        try:
+            ticker = yf.Ticker(symbol)
+            options_dates = ticker.options
+            if not options_dates:
+                return []
 
-        if not expirations:
-            return []
+            chain = ticker.option_chain(options_dates[0])
+            calls = chain.calls
 
-        nearest_expiry = expirations[0]
-        opt_chain = ticker.option_chain(nearest_expiry)
-        calls = opt_chain.calls
+            recommendations = []
+            for _, row in calls.iterrows():
+                if (
+                    row["openInterest"] < min_oi
+                    or row["volume"] < min_volume
+                    or row["impliedVolatility"] < min_iv
+                    or row["impliedVolatility"] > max_iv
+                    or row["ask"] - row["bid"] > max_spread
+                ):
+                    continue
 
-        # Add extra columns (mock delta and spread for illustration)
-        calls["delta"] = 0.5  # yfinance doesn't give delta; replace if you have real source
-        calls["spread"] = calls["ask"] - calls["bid"]
+                liquidity = row["openInterest"] + row["volume"]
+                spread = row["ask"] - row["bid"]
+                iv = row["impliedVolatility"]
 
-        # Filter
-        calls = calls[
-            (calls["openInterest"] >= min_oi) &
-            (calls["volume"] >= min_volume) &
-            (calls["impliedVolatility"] >= min_iv) &
-            (calls["impliedVolatility"] <= max_iv) &
-            (calls["spread"] <= max_spread)
-        ]
+                weights = scoring_weights or {
+                    "liquidity": 1.0,
+                    "iv": 1.0,
+                    "volume": 1.0,
+                    "spread": 1.0
+                }
+                score = (
+                    weights["liquidity"] * liquidity
+                    - weights["iv"] * iv * 100
+                    + weights["volume"] * row["volume"]
+                    - weights["spread"] * spread * 100
+                )
 
-        # Scoring
-        if scoring_weights is None:
-            scoring_weights = {"liquidity":1, "iv":1, "spread":1, "volume":1}
+                recommendations.append({
+                    "contract": row["contractSymbol"],
+                    "strike": row["strike"],
+                    "iv": iv,
+                    "oi": row["openInterest"],
+                    "volume": row["volume"],
+                    "spread": spread,
+                    "score": score
+                })
 
-        calls["score"] = (
-            scoring_weights["liquidity"] * calls["openInterest"] +
-            scoring_weights["volume"] * calls["volume"] -
-            scoring_weights["iv"] * calls["impliedVolatility"]*100 -
-            scoring_weights["spread"] * calls["spread"]*100
-        )
+            recommendations.sort(key=lambda x: x["score"], reverse=True)
+            return recommendations[:5]
 
-        top_calls = calls.sort_values("score", ascending=False).head(10)
-
-        recommendations = []
-        for _, row in top_calls.iterrows():
-            recommendations.append({
-                "contract": f"{symbol} {row['strike']}C exp {nearest_expiry}",
-                "strike": float(row["strike"]),
-                "iv": float(row["impliedVolatility"]),
-                "oi": int(row["openInterest"]),
-                "volume": int(row["volume"]),
-                "spread": float(row["spread"]),
-                "score": float(row["score"])
-            })
-        return recommendations
+        except Exception as e:
+            return [{"error": str(e)}]
