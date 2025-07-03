@@ -15,7 +15,7 @@ ensemble = EnsembleManager(ml_model=ml_model, rl_model=rl_agent, weight_rl=0.4)
 equities_exec = EquitiesExecutor()
 crypto_exec = CryptoExecutor(config={"api_key": "your_key", "api_secret": "your_secret"})
 options_exec = OptionsExecutor(config={"access_token": "your_token"})
-simulator = Simulator(config={"mode": "test"})
+simulator = Simulator()   # <-- no config argument
 
 # Streamlit UI
 st.set_page_config(page_title="V13 Quant System", layout="wide")
