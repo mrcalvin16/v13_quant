@@ -2,8 +2,6 @@ alpaca-trade-api
 python-binance
 ccxt
 requests
-stable-baselines3==1.6.2
-gym==0.25.2
 xgboost==1.6.2
 shap==0.41.0
 numba==0.53.1
