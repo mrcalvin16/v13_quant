@@ -17,7 +17,7 @@ ensemble = EnsembleManager(
     weight_rl=0.4
 )
 equities_exec = EquitiesExecutor()
-crypto_exec = CryptoExecutor()
+crypto_exec = CryptoExecutor(config={})
 options_exec = OptionsExecutor()
 simulator = Simulator()
 
