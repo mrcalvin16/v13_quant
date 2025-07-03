@@ -10,6 +10,7 @@ from prediction.options_scanner import OptionsAnalyzer
 from execution.equities import EquitiesExecutor
 from execution.crypto import CryptoExecutor
 from simulation.simulator import Simulator
+from alpaca_trade_api.rest import REST, TimeFrame
 
 # Initialize modules
 ml_model = MLEnsemble()
