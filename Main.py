@@ -1,89 +1,102 @@
 import streamlit as st
-import pandas as pd
 from prediction.ml_ensemble import MLEnsemble
 from prediction.rl_agent import RLAgent
 from prediction.ensemble_manager import EnsembleManager
-from execution.equities import EquitiesExecutor
-from execution.crypto import CryptoExecutor
-from execution.options import OptionsExecutor
 from simulation.simulator import Simulator
+from prediction.options_scanner import OptionsAnalyzer
 
 # Initialize models
 ml_model = MLEnsemble()
 rl_agent = RLAgent()
-
 ensemble = EnsembleManager(
     ml_model=ml_model,
     rl_model=rl_agent,
     weight_rl=0.4
 )
 
-# Initialize executors using Streamlit secrets
-crypto_exec = CryptoExecutor(config={
-    "api_key": st.secrets["BINANCE_API_KEY"],
-    "api_secret": st.secrets["BINANCE_SECRET_KEY"]
-})
+# Initialize simulator with example returns
+simulator = Simulator(returns=[0.01, -0.02, 0.015])
 
-options_exec = OptionsExecutor(config={
-    "access_token": st.secrets["TRADIER_ACCESS_TOKEN"]
-})
-
-equities_exec = EquitiesExecutor()
-simulator = Simulator()
+# Initialize options analyzer
+options_analyzer = OptionsAnalyzer()
 
 # Streamlit UI
-st.set_page_config(page_title="V13 Quant System", layout="wide")
+st.set_page_config(page_title="📊 V13 Quant System")
 
 st.title("🚀 V13 Quant System")
-st.success("✅ App loaded successfully.")
+st.success("✅ App loaded successfully!")
 
+# Show module status
 st.subheader("Modules Status")
-st.info("ML Prediction Module: Ready")
-st.info("RL Agent Module: Ready")
-st.info("Crypto Trading Module: Ready")
-st.info("Options Trading Module: Ready")
-st.info("Equities Trading Module: Ready")
+st.write("- ML Prediction Module: Ready")
+st.write("- RL Agent Module: Ready")
+st.write("- Options Analyzer Module: Ready (analysis only)")
+st.write("- Simulator Module: Ready")
 
-# Example Metrics
+# Example performance metrics
 st.subheader("Example Performance Metrics")
-metrics_data = {
-    "Metric": ["Sharpe Ratio", "Win Rate", "Max Drawdown"],
-    "Value": [1.42, "62%", "-12%"]
+metrics = {
+    "Sharpe Ratio": 1.42,
+    "Win Rate": "62%",
+    "Max Drawdown": "-12%",
 }
-df_metrics = pd.DataFrame(metrics_data)
-st.table(df_metrics)
+st.table(metrics.items())
 
-# Example blended signal chart
-st.subheader("Example Signal Chart")
-example_signal = pd.Series([10, 12, 9, 14, 15, 13])
-st.line_chart(example_signal)
+# Options Analyzer UI (God Mode)
+st.subheader("Options Analyzer (God Mode)")
 
-# Trade Execution Buttons with safety confirmation
-st.subheader("Trade Execution")
-if st.button("Submit Test Order (Simulation Only)"):
-    with st.spinner("Submitting test order..."):
-        result = simulator.run()
-    st.success(f"Simulation Result: {result}")
+symbol = st.text_input("Ticker Symbol", value="AAPL")
 
-if st.button("Submit Real Crypto Order (Binance)"):
-    confirm = st.radio("Are you sure you want to submit a live Binance order?", ["No", "Yes"])
-    if confirm == "Yes":
-        with st.spinner("Submitting live Binance order..."):
-            response = crypto_exec.submit_order(symbol="BTCUSDT", qty=0.001, side="buy")
-        st.success(f"Binance Order Response: {response}")
+col1, col2 = st.columns(2)
+min_iv = col1.slider("Minimum Implied Volatility", 0.0, 1.0, 0.2)
+max_iv = col2.slider("Maximum Implied Volatility", 0.0, 1.0, 0.6)
 
-if st.button("Submit Real Equities Order"):
-    confirm = st.radio("Are you sure you want to submit a live Equities order?", ["No", "Yes"])
-    if confirm == "Yes":
-        with st.spinner("Submitting live Equities order..."):
-            response = equities_exec.submit_order(symbol="AAPL", qty=1, side="buy")
-        st.success(f"Equities Order Response: {response}")
+min_oi = st.number_input("Minimum Open Interest", value=500)
+min_volume = st.number_input("Minimum Volume", value=250)
+max_spread = st.number_input("Maximum Spread ($)", value=0.25)
 
-if st.button("Submit Real Options Order"):
-    confirm = st.radio("Are you sure you want to submit a live Options order?", ["No", "Yes"])
-    if confirm == "Yes":
-        with st.spinner("Submitting live Options order..."):
-            response = options_exec.submit_order(symbol="AAPL_20240119C150", qty=1, side="buy")
-        st.success(f"Options Order Response: {response}")
+st.markdown("### Scoring Weights")
+scoring_weights = {
+    "liquidity": st.slider("Liquidity Weight", 0, 10, 1),
+    "iv": st.slider("IV Penalty Weight", 0, 10, 1),
+    "volume": st.slider("Volume Weight", 0, 10, 1),
+    "spread": st.slider("Spread Penalty Weight", 0, 10, 1)
+}
 
-st.caption("Use at your own risk. This is a prototype.")
+if st.button("Get Options Recommendations"):
+    with st.spinner("Analyzing options chain..."):
+        recs = options_analyzer.get_recommendations(
+            symbol,
+            min_oi=min_oi,
+            min_volume=min_volume,
+            min_iv=min_iv,
+            max_iv=max_iv,
+            max_spread=max_spread,
+            scoring_weights=scoring_weights
+        )
+
+    if recs:
+        st.write(f"Top options contracts for {symbol}:")
+        for r in recs:
+            st.write(
+                f"- **{r['contract']}** | "
+                f"Strike: {r['strike']} | "
+                f"IV: {r['iv']:.2f} | "
+                f"OI: {r['oi']} | "
+                f"Volume: {r['volume']} | "
+                f"Spread: {r['spread']:.2f} | "
+                f"Score: {r['score']:.1f}"
+            )
+    else:
+        st.warning("No options met your criteria.")
+
+# ML prediction example
+st.subheader("ML Blended Prediction")
+ml_input = [0.2, 0.3, -0.1]
+rl_obs = [0.05, 0.02]
+prediction = ensemble.predict(ml_input, rl_obs)
+st.write(f"Blended prediction signal: {prediction:.4f}")
+
+# Show simulated returns chart
+st.subheader("Simulation Returns")
+st.line_chart(simulator.returns)
