@@ -1,5 +1,6 @@
 import streamlit as st
 import logging
+import pandas as pd
 
 # Configure logger
 logger = logging.getLogger("V13Main")
@@ -27,16 +28,15 @@ def main():
     # Example log
     logger.info("App loaded successfully and UI rendered.")
 
-    # Optional: example dataframe
-    import pandas as pd
+    # Fixed: make all entries strings to avoid PyArrow error
     data = pd.DataFrame({
         "Metric": ["Sharpe Ratio", "Win Rate", "Max Drawdown"],
-        "Value": [1.42, "62%", "-12%"]
+        "Value": ["1.42", "62%", "-12%"]
     })
     st.subheader("Example Performance Metrics")
     st.table(data)
 
-    # Optional: simple placeholder chart
+    # Example placeholder chart
     st.subheader("Example Signal Chart")
     st.line_chart([10, 12, 9, 14, 15, 12])
 
