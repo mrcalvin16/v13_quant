@@ -18,7 +18,7 @@ ensemble = EnsembleManager(
 )
 equities_exec = EquitiesExecutor()
 crypto_exec = CryptoExecutor(config={})
-options_exec = OptionsExecutor(config={})
+options_exec = OptionsExecutor(config={"access_token": "dummy_token"})
 simulator = Simulator()
 
 # Streamlit UI
