@@ -2,44 +2,20 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from datetime import datetime
 from supabase import create_client
+from fastapi.responses import JSONResponse
 import os
 import yfinance as yf
 import pandas as pd
 import json
-import math
 
-# Supabase client setup
+# ---- Setup ----
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
 supabase = create_client(url, key)
-
 app = FastAPI()
-
-# Load tickers
-def load_tickers():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    nyse_path = os.path.join(base_dir, "../nyse-listed.csv")
-    other_path = os.path.join(base_dir, "../other-listed.csv")
-    nyse = pd.read_csv(nyse_path)
-    other = pd.read_csv(other_path)
-
-    def get_symbols(df):
-        for col in [
-            "ACT Symbol", "CQS Symbol", "NASDAQ Symbol",
-            "Symbol", "symbol", "Ticker", "ticker"
-        ]:
-            if col in df.columns:
-                return df[col].dropna().unique().tolist()
-        raise ValueError("No ticker column found in CSV.")
-
-    nyse_symbols = get_symbols(nyse)
-    other_symbols = get_symbols(other)
-    return sorted(set(nyse_symbols + other_symbols))
-
-tickers = load_tickers()
 clients = []
 
-# Models
+# ---- Models ----
 class Strategy(BaseModel):
     name: str
     description: str
@@ -55,6 +31,25 @@ class Signal(BaseModel):
 class Subscription(BaseModel):
     strategy_id: str
 
+# ---- Load Tickers ----
+def load_tickers():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    nyse_path = os.path.join(base_dir, "../nyse-listed.csv")
+    other_path = os.path.join(base_dir, "../other-listed.csv")
+    nyse = pd.read_csv(nyse_path)
+    other = pd.read_csv(other_path)
+    def get_symbols(df):
+        for col in ["ACT Symbol","CQS Symbol","NASDAQ Symbol","Symbol","symbol","Ticker","ticker"]:
+            if col in df.columns:
+                return df[col].dropna().unique().tolist()
+        raise ValueError("No ticker column found in CSV.")
+    nyse_symbols = get_symbols(nyse)
+    other_symbols = get_symbols(other)
+    return sorted(set(nyse_symbols + other_symbols))
+tickers = load_tickers()
+
+# ---- API ----
+
 @app.get("/")
 def root():
     return {"status": "Backend is running."}
@@ -67,63 +62,48 @@ def get_tickers():
 def get_recommendation(ticker: str):
     pred_score = 0.6  # Example dummy score
     pred_price = 100  # Example dummy price
-
-    # Replace this with your actual darkweb strategy UUID from SQL
-    darkweb_strategy_uuid = "fd4f6249-0769-4d89-8322-3789fccf7a5a"
-
-    darkweb = supabase.table("signals").select("*").eq("strategy_id", darkweb_strategy_uuid).eq("ticker", ticker).execute()
-    pump_score = max([s["confidence"] for s in (darkweb.data or [])], default=0)
-
+    # Use your actual darkweb UUID below
+    darkweb = supabase.table("signals").select("*").eq("strategy_id", "fd4f6249-0769-4d89-8322-3789fccf7a5a").eq("ticker", ticker).execute()
+    pump_score = max([s["confidence"] for s in getattr(darkweb, "data", [])], default=0)
     tk = yf.Ticker(ticker)
     cal = tk.calendar
-
-    # Robust earnings_score check for dict/dataframe/empty
-    if isinstance(cal, dict) or cal is None or (hasattr(cal, 'empty') and cal.empty):
-        earnings_score = 0
-    else:
-        earnings_score = 0.5
-
+    earnings_score = 0.5 if hasattr(cal, "empty") and not cal.empty else 0
     expirations = tk.options
-    opt_score = 0
     if expirations:
-        try:
-            chain = tk.option_chain(expirations[0])
-            calls = chain.calls
-            iv_mean = calls.impliedVolatility.fillna(0).mean()
-            opt_score = iv_mean / 2 if not math.isnan(iv_mean) else 0
-        except Exception:
-            opt_score = 0
-
-    # Helper to clean float values for JSON
-    def clean_float(val):
-        try:
-            if val is None or math.isnan(val) or math.isinf(val):
-                return 0.0
-            return float(val)
-        except Exception:
-            return 0.0
-
+        chain = tk.option_chain(expirations[0])
+        calls = chain.calls
+        opt_score = calls.impliedVolatility.mean() / 2 if not calls.empty else 0
+    else:
+        opt_score = 0
     combined = (
         0.4 * pred_score +
         0.2 * pump_score +
         0.2 * earnings_score +
         0.2 * opt_score
     )
-
+    # Log prediction for learning
+    try:
+        supabase.table("prediction_log").insert({
+            "ticker": ticker,
+            "score": combined,
+            "created_at": datetime.utcnow().isoformat()
+        }).execute()
+    except Exception:
+        pass
     return {
         "ticker": ticker,
-        "pred_score": clean_float(pred_score),
-        "pump_score": clean_float(pump_score),
-        "earnings_score": clean_float(earnings_score),
-        "opt_score": clean_float(opt_score),
-        "combined_score": clean_float(combined),
-        "pred_price": clean_float(pred_price)
+        "pred_score": pred_score,
+        "pump_score": pump_score,
+        "earnings_score": earnings_score,
+        "opt_score": opt_score,
+        "combined_score": combined,
+        "pred_price": pred_price
     }
 
 @app.get("/recommendations/top")
 def get_top_recommendations():
     res = supabase.table("recommendations").select("*").order("combined_score", desc=True).limit(10).execute()
-    return res.data
+    return getattr(res, "data", [])
 
 @app.post("/search-history")
 def save_search(ticker: str):
@@ -139,44 +119,49 @@ def get_options(ticker: str):
     exps = tk.options
     all_chains = []
     for exp in exps[:2]:
-        try:
-            chain = tk.option_chain(exp)
-            calls = chain.calls.fillna(0)
-            puts = chain.puts.fillna(0)
-            calls["type"] = "call"
-            puts["type"] = "put"
-            calls["expiration"] = exp
-            puts["expiration"] = exp
-            all_chains.extend([calls, puts])
-        except Exception:
-            continue
-    if all_chains:
-        df = pd.concat(all_chains).reset_index(drop=True)
-        df = df.fillna(0)
-        return df.to_dict(orient="records")
-    return []
+        chain = tk.option_chain(exp)
+        calls = chain.calls
+        puts = chain.puts
+        calls["type"] = "call"
+        puts["type"] = "put"
+        calls["expiration"] = exp
+        puts["expiration"] = exp
+        all_chains.extend([calls, puts])
+    df = pd.concat(all_chains).reset_index(drop=True)
+    return df.to_dict(orient="records")
 
 @app.get("/earnings/{ticker}")
 def get_earnings(ticker: str):
     tk = yf.Ticker(ticker)
     cal = tk.calendar
-    if isinstance(cal, dict) or cal is None or (hasattr(cal, 'empty') and cal.empty):
+    # Handle pandas DataFrame and dict cases
+    if hasattr(cal, "empty") and cal.empty:
+        return {"next_earnings": None}
+    if isinstance(cal, dict) and not cal:
         return {"next_earnings": None}
     try:
-        next_earnings = cal.loc["Earnings Date"][0]
-        return {"next_earnings": str(next_earnings)}
+        next_earnings = cal.loc["Earnings Date"][0] if not cal.empty else None
     except Exception:
-        return {"next_earnings": None}
+        next_earnings = None
+    return {"next_earnings": str(next_earnings)}
+
+@app.get("/ticker/{ticker}/history")
+def get_ticker_history(ticker: str):
+    tk = yf.Ticker(ticker)
+    hist = tk.history(period="1y")
+    if hist.empty:
+        return []
+    return hist.reset_index()[["Date", "Close"]].rename(columns={"Date": "date", "Close": "close"}).to_dict(orient="records")
 
 @app.get("/strategies")
 def list_strategies():
     res = supabase.table("strategies").select("*").execute()
-    return res.data
+    return getattr(res, "data", [])
 
 @app.post("/strategies")
 def create_strategy(strategy: Strategy):
     res = supabase.table("strategies").insert(strategy.dict()).execute()
-    return res.data[0]
+    return getattr(res, "data", [])[0]
 
 @app.post("/subscribe")
 def subscribe(sub: Subscription):
@@ -189,7 +174,7 @@ def subscribe(sub: Subscription):
 @app.get("/subscriptions")
 def get_subscriptions():
     res = supabase.table("subscriptions").select("*").eq("user_id", "anonymous").execute()
-    return res.data
+    return getattr(res, "data", [])
 
 @app.post("/signals")
 async def publish_signal(signal: Signal):
@@ -204,7 +189,7 @@ async def publish_signal(signal: Signal):
 @app.get("/signals")
 def get_signals():
     res = supabase.table("signals").select("*").order("timestamp", desc=True).execute()
-    return res.data
+    return getattr(res, "data", [])
 
 @app.websocket("/ws/signals")
 async def websocket_signals(websocket: WebSocket):
@@ -215,3 +200,14 @@ async def websocket_signals(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         clients.remove(websocket)
+
+# ---- Admin logs endpoint ----
+@app.get("/admin/logs")
+def get_logs():
+    try:
+        res = supabase.table("prediction_log").select("*").order("created_at", desc=True).limit(50).execute()
+        return getattr(res, "data", [])
+    except Exception as e:
+        return {"error": str(e)}
+
+# ---- END ----
