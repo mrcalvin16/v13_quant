@@ -13,7 +13,7 @@ import logging
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
 supabase = create_client(url, key)
-darkweb = supabase.table("signals").select("*").eq("strategy_id", "c2adcf36-2192-4c72-9097-a77e9bca015a").eq("ticker", ticker).execute()
+darkweb = supabase.table("signals").select("*").eq("strategy_id", "fd4f6249-0769-4d89-8322-3789fccf7a5a").eq("ticker", ticker).execute()
 
 
 # Logging config
