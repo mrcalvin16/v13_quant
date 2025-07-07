@@ -1,59 +1,31 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from datetime import datetime
 from supabase import create_client
 import os
-import pandas as pd
 import yfinance as yf
+import pandas as pd
 import json
+import smtplib
+from email.mime.text import MIMEText
+import requests
+
+# Supabase client
+url = os.environ.get("SUPABASE_URL")
+key = os.environ.get("SUPABASE_KEY")
+supabase = create_client(url, key)
 
 app = FastAPI()
 
-# Allow all origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Environment vars (trim whitespace)
-supabase_url = os.getenv("SUPABASE_URL", "").strip()
-supabase_key = os.getenv("SUPABASE_KEY", "").strip()
-
-if not supabase_url or not supabase_key:
-    raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set.")
-
-supabase = create_client(supabase_url, supabase_key)
-
-# Load tickers with robust detection
+# Load tickers
 def load_tickers():
-    import os
-    import pandas as pd
-
-    # Path relative to this file (Backend/main.py)
-    base_dir = os.path.dirname(__file__)
-    nyse_path = os.path.abspath(os.path.join(base_dir, "..", "nyse-listed.csv"))
-    other_path = os.path.abspath(os.path.join(base_dir, "..", "other-listed.csv"))
-
-    print("Loading NYSE tickers from:", nyse_path)
-    print("Loading Other tickers from:", other_path)
-
-    if not os.path.exists(nyse_path):
-        raise FileNotFoundError(f"NYSE CSV not found at {nyse_path}")
-    if not os.path.exists(other_path):
-        raise FileNotFoundError(f"Other CSV not found at {other_path}")
-
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    nyse_path = os.path.join(base_dir, "../nyse-listed.csv")
+    other_path = os.path.join(base_dir, "../other-listed.csv")
     nyse = pd.read_csv(nyse_path)
     other = pd.read_csv(other_path)
 
-    print("NYSE Columns:", nyse.columns)
-    print("Other Columns:", other.columns)
-
     def get_symbols(df):
-        # Try most likely column names
         for col in [
             "ACT Symbol",
             "CQS Symbol",
@@ -69,10 +41,36 @@ def load_tickers():
 
     nyse_symbols = get_symbols(nyse)
     other_symbols = get_symbols(other)
-
     return sorted(set(nyse_symbols + other_symbols))
-    
+
+# ✅ IMPORTANT: Make tickers global
+tickers = load_tickers()
+clients = []
+
+# Alerts
+def send_email(recipient, subject, body):
+    sender = os.environ["SMTP_USER"]
+    password = os.environ["SMTP_PASSWORD"]
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = recipient
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(sender, password)
+        server.send_message(msg)
+
+def send_telegram(body):
+    bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
+    chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    requests.post(url, json={"chat_id": chat_id, "text": body})
+
 # Models
+class Strategy(BaseModel):
+    name: str
+    description: str
+    tags: list
+
 class Signal(BaseModel):
     strategy_id: str
     ticker: str
@@ -80,15 +78,8 @@ class Signal(BaseModel):
     price_target: float
     confidence: float
 
-# Root endpoint
-@app.get("/")
-def root():
-    return {"status": "Backend is running."}
-
-# Ticker list
-@app.get("/tickers")
-def get_tickers():
-    return {"tickers": tickers}
+class Subscription(BaseModel):
+    strategy_id: str
 
 # WebSocket endpoint
 @app.websocket("/ws/signals")
@@ -101,7 +92,34 @@ async def websocket_signals(websocket: WebSocket):
     except WebSocketDisconnect:
         clients.remove(websocket)
 
-# Publish new signal
+# Endpoints
+@app.get("/tickers")
+async def get_tickers():
+    return tickers
+
+@app.post("/strategies")
+async def create_strategy(strategy: Strategy):
+    res = supabase.table("strategies").insert(strategy.dict()).execute()
+    return res.data[0]
+
+@app.get("/strategies")
+async def list_strategies():
+    res = supabase.table("strategies").select("*").execute()
+    return res.data
+
+@app.post("/subscribe")
+async def subscribe(sub: Subscription):
+    supabase.table("subscriptions").insert({
+        "user_id": "anonymous",
+        "strategy_id": sub.strategy_id
+    }).execute()
+    return {"status": "subscribed"}
+
+@app.get("/subscriptions")
+async def get_subscriptions():
+    res = supabase.table("subscriptions").select("*").eq("user_id", "anonymous").execute()
+    return res.data
+
 @app.post("/signals")
 async def publish_signal(signal: Signal):
     data = signal.dict()
@@ -110,19 +128,15 @@ async def publish_signal(signal: Signal):
     msg = json.dumps(data)
     for client in clients:
         await client.send_text(msg)
-    return {"status": "Signal published."}
+    return {"status": "signal published"}
 
-# List signals for ticker
-@app.get("/signals/{symbol}")
-def get_signals(symbol: str):
-    res = supabase.table("signals").select("*").eq("ticker", symbol).execute()
-    if res.error:
-        raise HTTPException(status_code=500, detail=str(res.error))
+@app.get("/signals")
+async def get_signals():
+    res = supabase.table("signals").select("*").order("timestamp", desc=True).execute()
     return res.data
 
-# Options chain
 @app.get("/options/{ticker}")
-def get_options(ticker: str):
+async def get_options(ticker: str):
     tk = yf.Ticker(ticker)
     exps = tk.options
     all_chains = []
@@ -138,9 +152,8 @@ def get_options(ticker: str):
     df = pd.concat(all_chains).reset_index(drop=True)
     return df.to_dict(orient="records")
 
-# Earnings calendar
 @app.get("/earnings/{ticker}")
-def get_earnings(ticker: str):
+async def get_earnings(ticker: str):
     tk = yf.Ticker(ticker)
     cal = tk.calendar
     if cal.empty:
@@ -148,9 +161,8 @@ def get_earnings(ticker: str):
     next_earnings = cal.loc["Earnings Date"][0]
     return {"next_earnings": str(next_earnings)}
 
-# Recommendation
 @app.get("/recommendation/{ticker}")
-def get_recommendation(ticker: str):
+async def get_recommendation(ticker: str):
     pred_score = 0.6  # Example placeholder
     pred_price = 100  # Example placeholder
     darkweb = supabase.table("signals").select("*").eq("strategy_id", "YOUR_DARKWEB_STRATEGY_UUID").eq("ticker", ticker).execute()
@@ -177,3 +189,16 @@ def get_recommendation(ticker: str):
         "combined_score": combined,
         "pred_price": pred_price
     }
+
+@app.get("/recommendations/top")
+async def get_top_recommendations():
+    res = supabase.table("recommendations").select("*").order("combined_score", desc=True).limit(10).execute()
+    return res.data
+
+@app.post("/search-history")
+async def save_search(ticker: str):
+    supabase.table("search_history").insert({
+        "user_id": "anonymous",
+        "ticker": ticker
+    }).execute()
+    return {"status": "saved"}
