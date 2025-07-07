@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objs as go
 import yfinance as yf
 
-API_URL = "http://localhost:8000"
+API_URL = "https://v13-quant.onrender.com"
 
 st.title("🚀 Quant Trading Dashboard (No Login)")
 
