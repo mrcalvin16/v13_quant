@@ -28,24 +28,50 @@ if not supabase_url or not supabase_key:
 
 supabase = create_client(supabase_url, supabase_key)
 
-# Load tickers
+# Load tickers with robust detection
 def load_tickers():
-    nyse = pd.read_csv("nyse-listed.csv")
-    other = pd.read_csv("other-listed.csv")
+    import os
+    import pandas as pd
+
+    # Path relative to this file (Backend/main.py)
+    base_dir = os.path.dirname(__file__)
+    nyse_path = os.path.abspath(os.path.join(base_dir, "..", "nyse-listed.csv"))
+    other_path = os.path.abspath(os.path.join(base_dir, "..", "other-listed.csv"))
+
+    print("Loading NYSE tickers from:", nyse_path)
+    print("Loading Other tickers from:", other_path)
+
+    if not os.path.exists(nyse_path):
+        raise FileNotFoundError(f"NYSE CSV not found at {nyse_path}")
+    if not os.path.exists(other_path):
+        raise FileNotFoundError(f"Other CSV not found at {other_path}")
+
+    nyse = pd.read_csv(nyse_path)
+    other = pd.read_csv(other_path)
+
+    print("NYSE Columns:", nyse.columns)
+    print("Other Columns:", other.columns)
 
     def get_symbols(df):
-        for col in ["ACT Symbol", "Symbol", "symbol", "Ticker"]:
+        # Try most likely column names
+        for col in [
+            "ACT Symbol",
+            "CQS Symbol",
+            "NASDAQ Symbol",
+            "Symbol",
+            "symbol",
+            "Ticker",
+            "ticker",
+        ]:
             if col in df.columns:
                 return df[col].dropna().unique().tolist()
         raise ValueError("No ticker column found in CSV.")
 
     nyse_symbols = get_symbols(nyse)
     other_symbols = get_symbols(other)
+
     return sorted(set(nyse_symbols + other_symbols))
-
-tickers = load_tickers()
-clients = []
-
+    
 # Models
 class Signal(BaseModel):
     strategy_id: str
