@@ -8,3 +8,5 @@ xgboost
 numpy
 pandas
 websockets
+plotly
+requests 
