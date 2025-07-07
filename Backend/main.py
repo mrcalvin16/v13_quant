@@ -1,12 +1,12 @@
 import os
-import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import pandas as pd
+import yfinance as yf
 from supabase import create_client
 from datetime import datetime, timedelta
-import yfinance as yf
 
-# Supabase config
+# --- Supabase Connection ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -21,105 +21,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Load or define your tickers (replace with your own logic/file) ---
 def load_tickers():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    repo_root = os.path.dirname(script_dir) if 'Backend' in script_dir else script_dir
+    # For example, load from CSV, or fallback to a sample list
+    try:
+        nyse = pd.read_csv("nyse-listed.csv")
+        return list(nyse['Symbol'])
+    except Exception:
+        # Fallback
+        return ["AAPL", "MSFT", "GOOGL", "TSLA", "AMZN", "NVDA"]
 
-    files = [
-        os.path.join(repo_root, "nyse-listed.csv"),
-        os.path.join(repo_root, "other-listed.csv"),
-    ]
-    symbols = []
-    for fname in files:
-        if os.path.exists(fname):
-            df = pd.read_csv(fname)
-            symbol_cols = [col for col in df.columns if "symbol" in col.lower()]
-            for col in symbol_cols:
-                symbols += df[col].dropna().astype(str).unique().tolist()
-        else:
-            print(f"Warning: {fname} not found!")
-    if not symbols:
-        symbols = ["AAPL", "GOOG", "MSFT"]
-    return sorted(set(symbols))
+tickers = load_tickers()
 
-TICKERS = load_tickers()
+# --- Helper: Get last closing price ---
+def get_latest_close(symbol):
+    try:
+        hist = yf.Ticker(symbol).history(period="1d")
+        if hist.empty:
+            print(f"Skipping {symbol}: No price data (may be delisted)")
+            return None
+        return float(hist['Close'].iloc[-1])
+    except Exception as e:
+        print(f"Error with {symbol}: {e}")
+        return None
 
-# --- Simple Model/Signals ---
-def get_stock_recommendations():
-    # Placeholder logic: Real model would go here
+# --- Recommendation logic (dummy) ---
+def get_stock_recommendations(n=5):
     recs = []
-    for symbol in TICKERS[:25]:
-        price = float(yf.Ticker(symbol).history(period="1d")['Close'][-1:])
-        if price < 15:
-            tag = "penny"
-        elif price > 300:
-            tag = "bluechip"
-        else:
-            tag = "growth"
+    for symbol in tickers[:n]:
+        price = get_latest_close(symbol)
+        if price is None:
+            continue
+        # Add more logic here (e.g., AI predictions, metrics, etc.)
         recs.append({
             "symbol": symbol,
-            "confidence": round(0.7 + 0.25*(price % 1), 2),
-            "predicted_price": price * 1.03,
-            "action": "buy",
-            "tag": tag,
+            "price": price,
+            "action": "buy",  # Placeholder logic
+            "confidence": 0.92  # Dummy value
         })
-    return sorted(recs, key=lambda r: r["confidence"], reverse=True)[:8]
+    return recs
 
-def get_earnings_calendar(symbol):
-    try:
-        tk = yf.Ticker(symbol)
-        cal = tk.earnings_dates
-        if isinstance(cal, pd.DataFrame) and not cal.empty:
-            return cal.head(5).to_dict(orient="records")
-        else:
-            return []
-    except Exception:
-        return []
-
-def get_options_chain(symbol):
-    try:
-        tk = yf.Ticker(symbol)
-        options_dates = tk.options
-        if not options_dates:
-            return []
-        opt = tk.option_chain(options_dates[0])
-        df = opt.calls if hasattr(opt, 'calls') else pd.DataFrame()
-        if not df.empty:
-            return df.head(10).to_dict(orient="records")
-        return []
-    except Exception:
-        return []
-
-def detect_pump_and_dumps():
-    # Toy logic: penny stocks that jumped >20% yesterday
-    results = []
-    for symbol in TICKERS[:100]:
-        try:
-            data = yf.Ticker(symbol).history(period="2d")
-            if len(data) < 2: continue
-            pct = ((data['Close'][-1] - data['Close'][-2]) / data['Close'][-2]) * 100
-            if pct > 20 and data['Close'][-1] < 5:
-                results.append({
-                    "symbol": symbol,
-                    "pct_move": round(pct, 2),
-                    "price": float(data['Close'][-1])
-                })
-        except Exception:
-            continue
-    return results
-
-# --- Logging, Metrics, Learning ---
-def log_prediction(symbol, action, predicted_price, timestamp=None):
-    timestamp = timestamp or datetime.utcnow().isoformat()
-    supabase.table("prediction_log").insert({
-        "ticker": symbol,
-        "action": action,
-        "predicted_price": predicted_price,
-        "timestamp": timestamp,
-        "actual_price": None,
-        "outcome": None,
-    }).execute()
-
+# --- Prediction log update ---
 def update_prediction_outcomes():
     logs = supabase.table("prediction_log").select("*").is_("actual_price", None).execute().data
     for entry in logs:
@@ -128,12 +70,13 @@ def update_prediction_outcomes():
         check_time = pred_time + timedelta(days=2)
         if datetime.utcnow() < check_time:
             continue
+
         try:
             tk = yf.Ticker(ticker)
             df = tk.history(start=pred_time.date(), end=check_time.date())
             if len(df) < 2:
                 continue
-            actual_price = float(df['Close'][-1])
+            actual_price = float(df['Close'].iloc[-1])
             predicted = entry["predicted_price"]
             action = entry.get("action", "buy")
             win = "win" if (actual_price >= predicted and action == "buy") or (actual_price <= predicted and action == "sell") else "loss"
@@ -144,70 +87,41 @@ def update_prediction_outcomes():
         except Exception as e:
             print(f"Backfill error for {ticker}: {e}")
 
-def get_metrics():
-    logs = supabase.table("prediction_log").select("*").execute().data
-    total = len(logs)
-    wins = len([l for l in logs if l.get("outcome") == "win"])
-    losses = len([l for l in logs if l.get("outcome") == "loss"])
-    win_rate = (wins / total) * 100 if total else 0
-    return {
-        "total_predictions": total,
-        "wins": wins,
-        "losses": losses,
-        "win_rate": round(win_rate, 2),
-    }
-
 # --- API Endpoints ---
 
 @app.get("/tickers")
-def list_tickers():
-    return {"tickers": TICKERS}
+def api_tickers():
+    return {"tickers": tickers}
 
 @app.get("/recommendations/top")
-def top_recommendations():
-    recs = get_stock_recommendations()
-    for rec in recs:
-        log_prediction(rec["symbol"], rec["action"], rec["predicted_price"])
-    return recs
-
-@app.get("/earnings/{symbol}")
-def earnings_view(symbol: str):
-    return get_earnings_calendar(symbol)
-
-@app.get("/options/{symbol}")
-def options_view(symbol: str):
-    return get_options_chain(symbol)
-
-@app.get("/pumpdumps")
-def pumpdumps():
-    return detect_pump_and_dumps()
+def top_recommendations(n: int = 5):
+    recs = get_stock_recommendations(n)
+    if not recs:
+        raise HTTPException(status_code=404, detail="No recommendations available.")
+    return {"recommendations": recs}
 
 @app.get("/admin/metrics")
 def metrics():
+    # This could be improved—pull real stats from logs table
     update_prediction_outcomes()
-    return get_metrics()
+    log_count = supabase.table("prediction_log").select("*").execute().data
+    win_count = sum(1 for x in log_count if x.get("outcome") == "win")
+    loss_count = sum(1 for x in log_count if x.get("outcome") == "loss")
+    return {
+        "total_predictions": len(log_count),
+        "wins": win_count,
+        "losses": loss_count,
+        "win_rate": round(100 * win_count / max(1, (win_count+loss_count)), 2)
+    }
 
-@app.get("/watchlist")
-def get_watchlist():
-    data = supabase.table("watchlist").select("*").execute().data
-    return data
+@app.get("/admin/logs")
+def logs():
+    # Returns latest logs (could be filtered, paginated, etc.)
+    data = supabase.table("prediction_log").select("*").order("timestamp", desc=True).limit(50).execute().data
+    return {"logs": data}
 
-@app.post("/watchlist/add")
-async def add_watchlist(req: Request):
-    body = await req.json()
-    ticker = body.get("ticker")
-    supabase.table("watchlist").insert({"ticker": ticker}).execute()
-    return {"success": True}
+# Add more endpoints as needed
 
-@app.get("/historic/{symbol}")
-def get_historic(symbol: str):
-    try:
-        df = yf.Ticker(symbol).history(period="1y")
-        return df.reset_index().to_dict(orient="records")
-    except Exception:
-        return []
-
-# --- Optionally, a simple root check ---
-@app.get("/")
-def root():
-    return {"status": "ok", "version": "1.1.0"}
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=10000, reload=True)
