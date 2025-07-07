@@ -1,143 +1,139 @@
 import streamlit as st
-import requests
 import pandas as pd
-import plotly.graph_objects as go
+import requests
 
-BACKEND_URL = "https://v13-quant.onrender.com"
+API_URL = "https://v13-quant.onrender.com"  # <-- Change to your deployed API
 
-st.set_page_config(page_title="V13 Quant Dashboard", layout="wide")
+st.set_page_config(page_title="Oracle Black AI Dashboard", layout="wide")
+st.title("🧠 Oracle Black Quant Dashboard")
 
-st.sidebar.title("Go to")
-tab = st.sidebar.radio("", ["Ticker Search", "Recommendations", "Strategies", "Options & Earnings"])
+# Sidebar
+with st.sidebar:
+    st.header("Navigation")
+    tab = st.radio(
+        "Choose a section",
+        ("Dashboard", "Recommendations", "Signals", "Strategies", "Options", "Earnings"),
+        index=0,
+        key="main_nav"
+    )
+    st.markdown("---")
+    st.info("🔄 Powered by Oracle Black AI\n\nUpgrade: Real-time quant + dark web risk signals.")
 
-st.markdown("""
-    <style>
-    .stTabs [data-baseweb="tab-list"] button {font-size: 1.15rem;}
-    .score-chip {display: inline-block; padding: 0.4em 1em; border-radius: 2em; color: #fff;}
-    .score-buy {background: #41b883;}
-    .score-hold {background: #f7b32b;}
-    .score-sell {background: #e94f37;}
-    </style>
-""", unsafe_allow_html=True)
-
-def fetch(endpoint, method="get", **kwargs):
-    url = f"{BACKEND_URL}{endpoint}"
+# Dashboard Tab
+if tab == "Dashboard":
+    st.header("📊 Quick Glance")
     try:
-        if method == "get":
-            r = requests.get(url, timeout=7)
-        elif method == "post":
-            r = requests.post(url, **kwargs, timeout=7)
-        else:
-            return None
-        if r.status_code == 200:
-            return r.json()
+        r = requests.get(f"{API_URL}/tickers")
+        r.raise_for_status()
+        tickers = r.json()
+        st.success(f"Loaded {len(tickers)} tickers.")
+        sample = tickers[:10]
+        st.write("Sample tickers:", sample)
     except Exception as e:
-        st.error(f"Error: {e}")
-    return None
+        st.error(f"Could not load tickers: {e}")
 
-if tab == "Ticker Search":
-    st.header("🔍 Search Tickers")
-    tickers = fetch("/tickers") or []
-    default_ticker = tickers[0] if tickers else "AAPL"
-    ticker = st.selectbox("Select Ticker", options=tickers or ["AAPL"], index=0)
-    col1, col2 = st.columns([1,1])
-
-    with col1:
-        if st.button("Get Recommendation"):
-            rec = fetch(f"/recommendation/{ticker}")
-            if rec:
-                st.markdown(f"""
-                <h4>{ticker} Recommendation</h4>
-                <div>
-                <span class="score-chip score-buy">Buy Score: {rec['combined_score']:.2f}</span>
-                <span class="score-chip score-hold">Predicted: ${rec['pred_price']:.2f}</span>
-                </div>
-                """, unsafe_allow_html=True)
-                st.write("Scores:")
-                st.json(rec)
-                # Show a simple bar chart of scores
-                scores = {
-                    'Prediction': rec['pred_score'],
-                    'Pump Score': rec['pump_score'],
-                    'Earnings': rec['earnings_score'],
-                    'Options': rec['opt_score']
-                }
-                fig = go.Figure([go.Bar(x=list(scores.keys()), y=list(scores.values()), marker_color="deepskyblue")])
-                fig.update_layout(title="Score Breakdown", yaxis=dict(range=[0,1]))
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.error("No recommendation found or backend error.")
-
-    with col2:
-        if st.button("Save Search"):
-            resp = fetch(f"/search-history?ticker={ticker}", method="post")
-            st.success("Search saved!" if resp else "Failed to save.")
-
+# Recommendations Tab
 elif tab == "Recommendations":
     st.header("💡 Top Recommendations")
-    data = fetch("/recommendations/top")
-    if data and isinstance(data, list) and len(data) > 0:
-        df = pd.DataFrame(data)
-        st.dataframe(df.style.background_gradient(cmap="YlGn"), use_container_width=True)
-        # Simple scatter of top combined scores
-        fig = go.Figure(go.Bar(
-            x=df['ticker'] if 'ticker' in df else df['symbol'],
-            y=df['combined_score'],
-            marker_color=df['combined_score'],
-            text=df['combined_score'],
-            textposition='auto'
-        ))
-        fig.update_layout(title="Top Combined Scores", yaxis_title="Score")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No recommendations available yet.")
 
-elif tab == "Strategies":
-    st.header("🛠️ Strategies")
-    strategies = fetch("/strategies")
-    if strategies:
-        for s in strategies:
-            st.subheader(s.get("name"))
-            st.caption(s.get("description"))
-            tags = s.get("tags", [])
-            tag_str = " ".join([f"`{tag}`" for tag in tags])
-            st.markdown(f"**Tags:** {tag_str}")
-            if st.button(f"Subscribe to {s.get('name')}", key=f"sub_{s['id']}"):
-                resp = fetch("/subscribe", method="post", json={"strategy_id": s['id']})
-                if resp and resp.get("status") == "subscribed":
-                    st.success(f"Subscribed to {s.get('name')}!")
+    try:
+        r = requests.get(f"{API_URL}/recommendations/top")
+        r.raise_for_status()
+        data = r.json()
+        if data and isinstance(data, list) and len(data) > 0:
+            df = pd.DataFrame(data)
+            # Check for required columns
+            if "combined_score" in df.columns and "ticker" in df.columns:
+                buy_now = df[df["combined_score"].fillna(0) >= 0.75].sort_values(by="combined_score", ascending=False)
+                if not buy_now.empty:
+                    st.success("🔥 **Buy These Now! These stocks are going to be a win:**")
+                    for _, row in buy_now.iterrows():
+                        st.markdown(
+                            f"<span style='font-size:22px;font-weight:bold'>🟢 {row['ticker']}</span> — "
+                            f"<span style='font-size:18px;'>Score: <b>{row['combined_score']:.2f}</b></span>",
+                            unsafe_allow_html=True
+                        )
                 else:
-                    st.error("Failed to subscribe.")
-    else:
-        st.info("No strategies found.")
+                    st.info("No high-confidence 'Buy Now' picks at the moment. Check back soon!")
+                st.subheader("Full Recommendations Table")
+                st.dataframe(df)
+                st.subheader("Combined Score Chart")
+                chart_data = df[["ticker", "combined_score"]].set_index("ticker")
+                st.bar_chart(chart_data)
+            else:
+                st.warning("API data is missing expected columns (ticker, combined_score).")
+        else:
+            st.info("No recommendations found.")
+    except Exception as e:
+        st.error(f"Error loading recommendations: {e}")
 
-elif tab == "Options & Earnings":
-    st.header("📅 Options & Earnings")
-    tickers = fetch("/tickers") or ["AAPL"]
-    ticker = st.selectbox("Select Ticker for Options", options=tickers, index=0)
-    col1, col2 = st.columns(2)
+# Signals Tab
+elif tab == "Signals":
+    st.header("📶 Live Signals")
+    try:
+        r = requests.get(f"{API_URL}/signals")
+        r.raise_for_status()
+        data = r.json()
+        if data and isinstance(data, list) and len(data) > 0:
+            df = pd.DataFrame(data)
+            if "timestamp" in df.columns:
+                df["timestamp"] = pd.to_datetime(df["timestamp"])
+                df = df.sort_values("timestamp", ascending=False)
+            st.dataframe(df)
+        else:
+            st.info("No signals available.")
+    except Exception as e:
+        st.error(f"Error loading signals: {e}")
 
-    with col1:
-        if st.button("Load Options Chain"):
-            data = fetch(f"/options/{ticker}")
+# Strategies Tab
+elif tab == "Strategies":
+    st.header("⚙️ Strategies")
+    try:
+        r = requests.get(f"{API_URL}/strategies")
+        r.raise_for_status()
+        data = r.json()
+        if data and isinstance(data, list) and len(data) > 0:
+            df = pd.DataFrame(data)
+            st.dataframe(df)
+        else:
+            st.info("No strategies found.")
+    except Exception as e:
+        st.error(f"Error loading strategies: {e}")
+
+# Options Tab
+elif tab == "Options":
+    st.header("🪙 Options Data")
+    ticker = st.text_input("Enter ticker for options chain:", "AAPL")
+    if ticker:
+        try:
+            r = requests.get(f"{API_URL}/options/{ticker.upper()}")
+            r.raise_for_status()
+            data = r.json()
             if data and isinstance(data, list) and len(data) > 0:
                 df = pd.DataFrame(data)
-                st.dataframe(df.head(20), use_container_width=True)
-                # Plot option prices vs strike
-                if 'strike' in df and 'lastPrice' in df:
-                    fig = go.Figure()
-                    df_call = df[df['type'] == 'call']
-                    df_put = df[df['type'] == 'put']
-                    fig.add_trace(go.Scatter(x=df_call['strike'], y=df_call['lastPrice'],
-                                             mode='markers+lines', name='Calls', marker_color='green'))
-                    fig.add_trace(go.Scatter(x=df_put['strike'], y=df_put['lastPrice'],
-                                             mode='markers+lines', name='Puts', marker_color='red'))
-                    fig.update_layout(title=f"Options Chain: {ticker}", xaxis_title="Strike", yaxis_title="Last Price")
-                    st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(df)
+                # Simple chart: plot Implied Volatility if present
+                if "impliedVolatility" in df.columns:
+                    st.subheader("Implied Volatility Chart")
+                    chart = df.groupby("expiration")["impliedVolatility"].mean()
+                    st.line_chart(chart)
             else:
-                st.error("Failed: Internal Server Error")
+                st.info(f"No options data found for {ticker}.")
+        except Exception as e:
+            st.error(f"Error loading options for {ticker}: {e}")
 
-    with col2:
-        if st.button("Get Earnings Calendar"):
-            earnings = fetch(f"/earnings/{ticker}")
-            st.write("Earnings Date:", earnings.get("next_earnings", "N/A"))
+# Earnings Tab
+elif tab == "Earnings":
+    st.header("📅 Earnings Calendar")
+    ticker = st.text_input("Enter ticker for earnings date:", "AAPL", key="earnings_ticker")
+    if ticker:
+        try:
+            r = requests.get(f"{API_URL}/earnings/{ticker.upper()}")
+            r.raise_for_status()
+            data = r.json()
+            if "next_earnings" in data and data["next_earnings"]:
+                st.success(f"Next earnings date for {ticker.upper()}: {data['next_earnings']}")
+            else:
+                st.info(f"No upcoming earnings for {ticker.upper()}")
+        except Exception as e:
+            st.error(f"Error loading earnings for {ticker}: {e}")
