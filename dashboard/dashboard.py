@@ -1,139 +1,120 @@
-import streamlit as st
-import pandas as pd
+import dash
+from dash import dcc, html, Input, Output
+import plotly.graph_objs as go
 import requests
+import pandas as pd
 
-API_URL = "https://v13-quant.onrender.com"  # <-- Change to your deployed API
+API = "https://v13-quant.onrender.com"
 
-st.set_page_config(page_title="Oracle Black AI Dashboard", layout="wide")
-st.title("🧠 Oracle Black Quant Dashboard")
-
-# Sidebar
-with st.sidebar:
-    st.header("Navigation")
-    tab = st.radio(
-        "Choose a section",
-        ("Dashboard", "Recommendations", "Signals", "Strategies", "Options", "Earnings"),
-        index=0,
-        key="main_nav"
-    )
-    st.markdown("---")
-    st.info("🔄 Powered by Oracle Black AI\n\nUpgrade: Real-time quant + dark web risk signals.")
-
-# Dashboard Tab
-if tab == "Dashboard":
-    st.header("📊 Quick Glance")
+def fetch_top_stocks():
     try:
-        r = requests.get(f"{API_URL}/tickers")
-        r.raise_for_status()
-        tickers = r.json()
-        st.success(f"Loaded {len(tickers)} tickers.")
-        sample = tickers[:10]
-        st.write("Sample tickers:", sample)
-    except Exception as e:
-        st.error(f"Could not load tickers: {e}")
+        r = requests.get(f"{API}/recommendations/top")
+        if r.ok and isinstance(r.json(), list):
+            return pd.DataFrame(r.json())
+    except Exception:
+        pass
+    return pd.DataFrame()
 
-# Recommendations Tab
-elif tab == "Recommendations":
-    st.header("💡 Top Recommendations")
+top_df = fetch_top_stocks()
+tickers = top_df['ticker'].tolist() if not top_df.empty else []
 
-    try:
-        r = requests.get(f"{API_URL}/recommendations/top")
-        r.raise_for_status()
-        data = r.json()
-        if data and isinstance(data, list) and len(data) > 0:
-            df = pd.DataFrame(data)
-            # Check for required columns
-            if "combined_score" in df.columns and "ticker" in df.columns:
-                buy_now = df[df["combined_score"].fillna(0) >= 0.75].sort_values(by="combined_score", ascending=False)
-                if not buy_now.empty:
-                    st.success("🔥 **Buy These Now! These stocks are going to be a win:**")
-                    for _, row in buy_now.iterrows():
-                        st.markdown(
-                            f"<span style='font-size:22px;font-weight:bold'>🟢 {row['ticker']}</span> — "
-                            f"<span style='font-size:18px;'>Score: <b>{row['combined_score']:.2f}</b></span>",
-                            unsafe_allow_html=True
-                        )
-                else:
-                    st.info("No high-confidence 'Buy Now' picks at the moment. Check back soon!")
-                st.subheader("Full Recommendations Table")
-                st.dataframe(df)
-                st.subheader("Combined Score Chart")
-                chart_data = df[["ticker", "combined_score"]].set_index("ticker")
-                st.bar_chart(chart_data)
-            else:
-                st.warning("API data is missing expected columns (ticker, combined_score).")
-        else:
-            st.info("No recommendations found.")
-    except Exception as e:
-        st.error(f"Error loading recommendations: {e}")
+app = dash.Dash(__name__)
+app.title = "Oracle Black AI Dashboard"
 
-# Signals Tab
-elif tab == "Signals":
-    st.header("📶 Live Signals")
-    try:
-        r = requests.get(f"{API_URL}/signals")
-        r.raise_for_status()
-        data = r.json()
-        if data and isinstance(data, list) and len(data) > 0:
-            df = pd.DataFrame(data)
-            if "timestamp" in df.columns:
-                df["timestamp"] = pd.to_datetime(df["timestamp"])
-                df = df.sort_values("timestamp", ascending=False)
-            st.dataframe(df)
-        else:
-            st.info("No signals available.")
-    except Exception as e:
-        st.error(f"Error loading signals: {e}")
+app.layout = html.Div(
+    style={"background": "#181818", "color": "#fafafa", "minHeight": "100vh", "padding": "2rem", "fontFamily": "Arial"},
+    children=[
+        html.H1("Oracle Black AI Dashboard", style={"textAlign": "center", "fontWeight": "bold"}),
+        html.Div([
+            html.H3("Buy These Now!"),
+            html.P("These stocks are going to be a win.", style={"color": "#03DAC6", "fontWeight": "bold"}),
+            html.Ul(
+                [
+                    html.Li(
+                        f"{row['ticker']} — Score: {row['combined_score']:.2f}",
+                        style={"fontSize": "1.1rem", "margin": "6px 0"}
+                    ) for _, row in top_df.iterrows()
+                ]
+            ) if not top_df.empty else html.Div("No recommendations found. Please check the backend.", style={"color": "red"})
+        ],
+        style={"background": "#23272b", "borderRadius": "12px", "padding": "1.3rem", "boxShadow": "0 2px 10px #0003", "marginBottom": "2rem"}
+        ),
+        html.Div([
+            html.Label("Explore Stock Details:", style={"fontWeight": "bold", "marginRight": "12px"}),
+            dcc.Dropdown(
+                id="ticker-dropdown",
+                options=[{"label": t, "value": t} for t in tickers],
+                value=tickers[0] if tickers else None,
+                style={"width": "300px", "color": "#181818"}
+            )
+        ]),
+        dcc.Tabs(
+            id="info-tabs",
+            value="options",
+            children=[
+                dcc.Tab(label="Options Chain", value="options"),
+                dcc.Tab(label="Earnings", value="earnings"),
+            ],
+            style={"marginTop": "1rem"}
+        ),
+        html.Div(id="tab-content", style={"marginTop": "1.5rem"}),
+        html.Div([
+            html.P("Powered by Oracle Black ULTRA — The Quant God Mode.", style={"color": "#888", "textAlign": "center", "marginTop": "3rem"})
+        ])
+    ]
+)
 
-# Strategies Tab
-elif tab == "Strategies":
-    st.header("⚙️ Strategies")
-    try:
-        r = requests.get(f"{API_URL}/strategies")
-        r.raise_for_status()
-        data = r.json()
-        if data and isinstance(data, list) and len(data) > 0:
-            df = pd.DataFrame(data)
-            st.dataframe(df)
-        else:
-            st.info("No strategies found.")
-    except Exception as e:
-        st.error(f"Error loading strategies: {e}")
-
-# Options Tab
-elif tab == "Options":
-    st.header("🪙 Options Data")
-    ticker = st.text_input("Enter ticker for options chain:", "AAPL")
-    if ticker:
+@app.callback(
+    Output("tab-content", "children"),
+    [Input("ticker-dropdown", "value"), Input("info-tabs", "value")]
+)
+def render_tab(ticker, tab):
+    if not ticker:
+        return html.Div("Select a ticker from the dropdown.")
+    if tab == "options":
         try:
-            r = requests.get(f"{API_URL}/options/{ticker.upper()}")
-            r.raise_for_status()
-            data = r.json()
-            if data and isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data)
-                st.dataframe(df)
-                # Simple chart: plot Implied Volatility if present
-                if "impliedVolatility" in df.columns:
-                    st.subheader("Implied Volatility Chart")
-                    chart = df.groupby("expiration")["impliedVolatility"].mean()
-                    st.line_chart(chart)
-            else:
-                st.info(f"No options data found for {ticker}.")
+            r = requests.get(f"{API}/options/{ticker}", timeout=8)
+            if not r.ok or not r.json():
+                return html.Div("No options data available.")
+            df = pd.DataFrame(r.json())
+            if df.empty or "strike" not in df.columns or "impliedVolatility" not in df.columns:
+                return html.Div("Options data is incomplete.")
+            fig = go.Figure()
+            for opt_type in ["call", "put"]:
+                sub = df[df['type'] == opt_type]
+                if not sub.empty:
+                    fig.add_trace(go.Scatter(
+                        x=sub['strike'][:30],
+                        y=sub['impliedVolatility'][:30],
+                        mode='markers+lines',
+                        name=opt_type.capitalize(),
+                        marker={'size': 8}
+                    ))
+            fig.update_layout(
+                title=f"{ticker} Option IV vs Strike",
+                xaxis_title="Strike",
+                yaxis_title="Implied Volatility",
+                plot_bgcolor="#23272b",
+                paper_bgcolor="#23272b",
+                font=dict(color="#fafafa"),
+                legend=dict(x=0.7, y=1.15, orientation="h")
+            )
+            return dcc.Graph(figure=fig)
         except Exception as e:
-            st.error(f"Error loading options for {ticker}: {e}")
-
-# Earnings Tab
-elif tab == "Earnings":
-    st.header("📅 Earnings Calendar")
-    ticker = st.text_input("Enter ticker for earnings date:", "AAPL", key="earnings_ticker")
-    if ticker:
+            return html.Div(f"Error fetching options: {e}")
+    elif tab == "earnings":
         try:
-            r = requests.get(f"{API_URL}/earnings/{ticker.upper()}")
-            r.raise_for_status()
-            data = r.json()
-            if "next_earnings" in data and data["next_earnings"]:
-                st.success(f"Next earnings date for {ticker.upper()}: {data['next_earnings']}")
-            else:
-                st.info(f"No upcoming earnings for {ticker.upper()}")
+            r = requests.get(f"{API}/earnings/{ticker}", timeout=8)
+            if r.ok and isinstance(r.json(), dict):
+                ne = r.json().get("next_earnings")
+                return html.Div([
+                    html.H4("Next Earnings Date", style={"marginBottom": "8px"}),
+                    html.Div(str(ne) if ne else "No upcoming earnings found.", style={"fontSize": "1.1rem"})
+                ])
+            return html.Div("No earnings info.")
         except Exception as e:
-            st.error(f"Error loading earnings for {ticker}: {e}")
+            return html.Div(f"Error fetching earnings: {e}")
+    return html.Div("Select a tab.")
+
+if __name__ == "__main__":
+    app.run_server(debug=True, port=8050)
