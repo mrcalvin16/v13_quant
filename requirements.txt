@@ -1,7 +1,0 @@
-streamlit
-scikit-learn
-yfinance
-matplotlib
-numpy
-pandas
-alpaca-trade-api==3.2.0
