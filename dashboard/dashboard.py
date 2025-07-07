@@ -37,14 +37,14 @@ with tabs[0]:
             data = r.json()
             st.json(data)
         else:
-            st.error(f"Error: {r.status_code}")
+            st.error(f"Error: {r.status_code}\n{r.text}")
 
     if st.button("Save Search"):
         r = requests.post(f"{API_URL}/search-history", params={"ticker": ticker})
         if r.ok:
             st.success("Search saved.")
         else:
-            st.error("Failed to save search.")
+            st.error(f"Error: {r.status_code}\n{r.text}")
 
 # Recommendations Tab
 with tabs[1]:
@@ -54,7 +54,7 @@ with tabs[1]:
         data = pd.DataFrame(r.json())
         st.dataframe(data)
     else:
-        st.error("Failed to load recommendations.")
+        st.error(f"Error: {r.status_code}\n{r.text}")
 
 # Strategies Tab
 with tabs[2]:
@@ -69,7 +69,7 @@ with tabs[2]:
                 if r.ok:
                     st.success("Subscribed.")
                 else:
-                    st.error("Failed to subscribe.")
+                    st.error(f"Error: {r.status_code}\n{r.text}")
     else:
         st.info("No strategies found.")
 
@@ -94,7 +94,7 @@ with tabs[2]:
             if r.ok:
                 st.success("Signal published.")
             else:
-                st.error("Failed to publish signal.")
+                st.error(f"Error: {r.status_code}\n{r.text}")
 
 # Options & Earnings Tab
 with tabs[3]:
@@ -106,12 +106,12 @@ with tabs[3]:
             data = pd.DataFrame(r.json())
             st.dataframe(data)
         else:
-            st.error("Failed to load options.")
+            st.error(f"Error: {r.status_code}\n{r.text}")
     if st.button("Get Earnings Calendar"):
         r = requests.get(f"{API_URL}/earnings/{ticker2}")
         if r.ok:
             st.json(r.json())
         else:
-            st.error("Failed to load earnings.")
+            st.error(f"Error: {r.status_code}\n{r.text}")
 
 st.caption("V13 Quant Platform © 2025")
