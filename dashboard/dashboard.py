@@ -1,82 +1,87 @@
 import streamlit as st
 import pandas as pd
 import requests
-import plotly.express as px
+import plotly.graph_objects as go
 
-BACKEND_URL = "https://v13-quant.onrender.com"
+BASE_URL = "https://v13-quant.onrender.com"
 
-st.set_page_config(layout="wide")
-st.title("Oracle Black ULTRA Dashboard")
+st.set_page_config(page_title="Oracle Black ULTRA", layout="wide")
+st.title("🧠 Oracle Black ULTRA Dashboard")
 
-tabs = st.tabs(["Buy Now", "Options", "Earnings", "Historic Data", "Search", "Pump & Dumps", "Admin"])
+tabs = st.tabs([
+    "🔮 Buy Now",
+    "📈 Historic Data",
+    "💰 Earnings",
+    "🚨 Pump & Dump",
+    "👁 Watchlist",
+    "📊 Admin Metrics",
+    "🔎 Search"
+])
 
 with tabs[0]:
-    st.header("Buy These NOW (Predictions)")
-    res = requests.get(f"{BACKEND_URL}/recommendations/top")
-    if res.ok:
-        top = pd.DataFrame(res.json())
-        st.dataframe(top)
-        if not top.empty:
-            st.write("### Highest Confidence Buy Now:")
-            st.write(top[["ticker", "combined_score", "predicted_price"]].head(5))
-        fig = px.bar(top, x="ticker", y="combined_score", title="Top Picks")
-        st.plotly_chart(fig, use_container_width=True)
+    st.header("🔥 Quick Win Picks")
+    resp = requests.get(f"{BASE_URL}/buynow")
+    if resp.ok:
+        df = pd.DataFrame(resp.json())
+        st.dataframe(df)
+        for row in df.itertuples():
+            fig = go.Figure(data=go.Candlestick(
+                x=[row.ticker],
+                open=[row.open],
+                high=[row.high],
+                low=[row.low],
+                close=[row.predicted_price]
+            ))
+            fig.update_layout(title=f"{row.ticker} Forecast", xaxis_title="Symbol", yaxis_title="Price")
+            st.plotly_chart(fig, use_container_width=True)
 
 with tabs[1]:
-    st.header("Options Chains")
-    ticker = st.text_input("Ticker for options", "")
-    if ticker:
-        res = requests.get(f"{BACKEND_URL}/options/{ticker}")
-        if res.ok:
-            df = pd.DataFrame(res.json())
-            st.dataframe(df)
-        else:
-            st.warning("No options found.")
+    st.header("📜 Historical Trends")
+    ticker = st.text_input("Enter Symbol", "AAPL")
+    if st.button("Get Historical"):
+        resp = requests.get(f"{BASE_URL}/historic?ticker={ticker}")
+        if resp.ok:
+            hist = pd.DataFrame(resp.json())
+            st.line_chart(hist.set_index("date")[["close"]])
 
 with tabs[2]:
-    st.header("Upcoming Earnings")
-    ticker = st.text_input("Ticker for earnings", "")
-    if ticker:
-        res = requests.get(f"{BACKEND_URL}/earnings/{ticker}")
-        st.write(res.json())
+    st.header("📆 Earnings Reports")
+    resp = requests.get(f"{BASE_URL}/earnings")
+    if resp.ok:
+        df = pd.DataFrame(resp.json())
+        st.dataframe(df)
 
 with tabs[3]:
-    st.header("Historic Data")
-    ticker = st.text_input("Ticker for history", "")
-    if ticker:
-        import yfinance as yf
-        tk = yf.Ticker(ticker)
-        df = tk.history(period="1y")
-        st.line_chart(df["Close"])
+    st.header("⚠️ Pump & Dump Radar")
+    resp = requests.get(f"{BASE_URL}/pumps")
+    if resp.ok:
+        df = pd.DataFrame(resp.json())
+        st.dataframe(df)
 
 with tabs[4]:
-    st.header("Search Stocks")
-    tickers = requests.get(f"{BACKEND_URL}/tickers").json()
-    search = st.text_input("Search by symbol")
-    if search:
-        result = [t for t in tickers if search.upper() in t]
-        st.write(result)
+    st.header("👁 Watchlist Tracker")
+    watch_symbol = st.text_input("Add Ticker to Watchlist")
+    if st.button("Add to Watchlist"):
+        requests.post(f"{BASE_URL}/watchlist", json={"ticker": watch_symbol})
+    resp = requests.get(f"{BASE_URL}/watchlist")
+    if resp.ok:
+        df = pd.DataFrame(resp.json())
+        st.dataframe(df)
 
 with tabs[5]:
-    st.header("Pump & Dumps / Penny Stocks Detector")
-    if st.button("Scan for pump & dumps / penny stocks"):
-        flagged = requests.get(f"{BACKEND_URL}/pumpdumps").json()
-        st.dataframe(pd.DataFrame(flagged))
-        st.write(f"Total flagged: {len(flagged)}")
+    st.header("📊 Admin Metrics / Learning")
+    resp = requests.get(f"{BASE_URL}/admin/metrics")
+    if resp.ok:
+        data = resp.json()
+        st.metric("Total Predictions", data.get("total_predictions", 0))
+        st.metric("Win Rate", f"{data.get('win_rate', 0):.2%}")
+        st.metric("Losses", data.get("losses", 0))
 
 with tabs[6]:
-    st.header("Admin: Logs, Metrics, Training")
-    metrics = requests.get(f"{BACKEND_URL}/admin/metrics").json()
-    st.metric("Win Rate", f"{metrics.get('win_rate', 0)*100:.2f}%")
-    st.metric("Avg. Confidence", f"{metrics.get('avg_confidence', 0):.2f}")
-    st.metric("Flagged", metrics.get("flagged_count", 0))
-    st.write("Current Weights:", metrics.get("weights"))
-    logs = requests.get(f"{BACKEND_URL}/admin/logs").json()
-    st.write("Recent Events:")
-    st.dataframe(pd.DataFrame(logs))
-    bad_id = st.number_input("Flag bad prediction by ID", min_value=0, step=1)
-    if st.button("Flag"):
-        resp = requests.post(f"{BACKEND_URL}/admin/flag", json={"prediction_id": bad_id})
-        st.success(f"Flagged {bad_id}: {resp.text}")
-
-st.info("Oracle Black ULTRA - Live, Self-Learning, Pump & Dump-Aware Prediction & Monitoring")
+    st.header("🔎 Ticker Search")
+    search_query = st.text_input("Search Symbol")
+    if st.button("Search"):
+        resp = requests.get(f"{BASE_URL}/search?ticker={search_query}")
+        if resp.ok:
+            result = pd.DataFrame(resp.json())
+            st.dataframe(result)
