@@ -1,0 +1,6 @@
+streamlit
+httpx
+pandas
+plotly
+yfinance
+streamlit-authenticator
