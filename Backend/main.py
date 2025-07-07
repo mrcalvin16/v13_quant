@@ -17,10 +17,14 @@ supabase = create_client(url, key)
 
 app = FastAPI()
 
-# Load tickers (no "data/" prefix)
+# Load tickers with absolute paths
 def load_tickers():
-    nyse = pd.read_csv("nyse-listed.csv")
-    other = pd.read_csv("other-listed.csv")
+    # This gets you the ROOT of your repo, regardless of cwd
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    nyse_path = os.path.join(base_dir, "nyse-listed.csv")
+    other_path = os.path.join(base_dir, "other-listed.csv")
+    nyse = pd.read_csv(nyse_path)
+    other = pd.read_csv(other_path)
     nyse_symbols = nyse["Symbol"].dropna().unique().tolist()
     other_symbols = other["Symbol"].dropna().unique().tolist()
     return sorted(set(nyse_symbols + other_symbols))
