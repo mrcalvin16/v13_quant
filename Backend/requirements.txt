@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+supabase
+python-dotenv
+yfinance
+joblib
+xgboost
+numpy
+pandas
+fastapi-supabase-auth
+websockets
