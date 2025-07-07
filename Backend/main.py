@@ -13,7 +13,8 @@ import logging
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
 supabase = create_client(url, key)
-DARKWEB_STRATEGY_UUID = "c2adcf36-2192-4c72-9097-a77e9bca015a"  # replace with your real UUID
+darkweb = supabase.table("signals").select("*").eq("strategy_id", "c2adcf36-2192-4c72-9097-a77e9bca015a").eq("ticker", ticker).execute()
+
 
 # Logging config
 logging.basicConfig(level=logging.INFO)
