@@ -17,16 +17,26 @@ supabase = create_client(url, key)
 
 app = FastAPI()
 
-# Load tickers with absolute paths
+# Load tickers with auto-detect column logic
 def load_tickers():
-    # This gets you the ROOT of your repo, regardless of cwd
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     nyse_path = os.path.join(base_dir, "nyse-listed.csv")
     other_path = os.path.join(base_dir, "other-listed.csv")
     nyse = pd.read_csv(nyse_path)
     other = pd.read_csv(other_path)
-    nyse_symbols = nyse["Symbol"].dropna().unique().tolist()
-    other_symbols = other["Symbol"].dropna().unique().tolist()
+
+    # Show columns in logs for debugging
+    print("NYSE Columns:", nyse.columns)
+    print("Other Columns:", other.columns)
+
+    def get_symbols(df):
+        for col in ["Symbol", "symbol", "Ticker", "ticker"]:
+            if col in df.columns:
+                return df[col].dropna().unique().tolist()
+        raise ValueError("No ticker column found in CSV.")
+
+    nyse_symbols = get_symbols(nyse)
+    other_symbols = get_symbols(other)
     return sorted(set(nyse_symbols + other_symbols))
 
 tickers = load_tickers()
