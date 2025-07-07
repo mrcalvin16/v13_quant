@@ -1,216 +1,204 @@
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import os
-import pandas as pd
 import yfinance as yf
-from fastapi import FastAPI, Query
-from supabase import create_client
 from datetime import datetime, timedelta
+from supabase import create_client
+import pandas as pd
+import random
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Supabase config
+url = os.getenv("SUPABASE_URL")
+key = os.getenv("SUPABASE_KEY")
+supabase = create_client(url, key)
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"]
+)
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# -------------------- DATA LOAD -------------------------
-
+# Load tickers for search
 def load_tickers():
     try:
-        nyse = pd.read_csv("nyse-listed.csv")['Symbol'].tolist()
-        nasdaq = pd.read_csv("nasdaq-listed.csv")['Symbol'].tolist()
-        return list(set(nyse + nasdaq))
+        nyse = pd.read_csv("nyse-listed.csv")
+        nasdaq = pd.read_csv("nasdaq-listed.csv")
+        return list(set(nyse['Symbol']).union(set(nasdaq['Symbol'])))
     except Exception as e:
-        print(f"Ticker load error: {e}")
-        return []
+        logger.warning("Could not load tickers:", exc_info=e)
+        return ["AAPL", "TSLA", "GOOG", "MSFT", "AMZN", "NVDA", "META", "NFLX", "BABA", "AMD"]
 
 TICKERS = load_tickers()
 
-# -------------------- UTILS -----------------------------
+# Model
+class TickerRequest(BaseModel):
+    symbol: str
 
-def log_event(event, details):
-    supabase.table("app_log").insert({
-        "timestamp": datetime.utcnow().isoformat(),
-        "event": event,
-        "details": details
-    }).execute()
+class WatchlistRequest(BaseModel):
+    user_id: str
+    symbol: str
 
-def get_price(symbol):
-    try:
-        df = yf.Ticker(symbol).history(period="1d")
-        if df.empty:
-            return None
-        return float(df['Close'].iloc[0])
-    except Exception:
-        return None
-
-def get_history(symbol, period="1y"):
-    try:
-        df = yf.Ticker(symbol).history(period=period)
-        return df.reset_index().to_dict('records')
-    except Exception:
-        return []
-
-def get_earnings(symbol):
-    try:
-        tk = yf.Ticker(symbol)
-        df = tk.earnings_dates
-        return df.reset_index().to_dict('records') if not df.empty else []
-    except Exception:
-        return []
-
-# ------------------- RECOMMENDATIONS ----------------------
-
-def get_stock_recommendations(top_n=5):
-    picks = []
-    for symbol in TICKERS[:150]:  # Limit to 150 for perf. You can adjust.
-        price = get_price(symbol)
-        if not price or price < 1:  # skip penny
-            continue
-        # Simple momentum filter (customize for your model)
+# Core Logic
+def get_top_recommendations(n=10):
+    scores = []
+    for symbol in random.sample(TICKERS, min(50, len(TICKERS))):
         try:
-            df = yf.Ticker(symbol).history(period="5d")
-            if len(df) < 5: continue
-            perf = (df['Close'][-1] - df['Close'][0]) / df['Close'][0]
-            if perf > 0.10:  # 10% up in 5d
-                picks.append((symbol, perf, price))
+            data = yf.Ticker(symbol).history(period="5d")
+            if len(data) < 5:
+                continue
+            gain = (data['Close'][-1] - data['Close'][0]) / data['Close'][0]
+            score = gain * 100 + random.uniform(-2, 2)
+            scores.append({"symbol": symbol, "score": round(score, 2)})
+        except Exception as e:
+            logger.error(f"Error processing {symbol}: {e}")
+    top = sorted(scores, key=lambda x: x['score'], reverse=True)[:n]
+    return top
+
+def get_options_top(n=10):
+    results = []
+    for symbol in random.sample(TICKERS, min(30, len(TICKERS))):
+        try:
+            tk = yf.Ticker(symbol)
+            opt_dates = tk.options
+            if not opt_dates:
+                continue
+            calls = tk.option_chain(opt_dates[0]).calls
+            top_call = calls.loc[calls['volume'].idxmax()]
+            results.append({
+                "symbol": symbol,
+                "strike": top_call["strike"],
+                "volume": int(top_call["volume"]),
+                "lastPrice": float(top_call["lastPrice"])
+            })
         except Exception:
             continue
-    picks = sorted(picks, key=lambda x: -x[1])[:top_n]
-    log_event("get_stock_recommendations", {"tickers": [p[0] for p in picks]})
-    return [{"symbol": s, "momentum": round(m, 3), "price": p} for s, m, p in picks]
+    return sorted(results, key=lambda x: x["volume"], reverse=True)[:n]
 
-# ------------------- OPTIONS RECOMMEND --------------------
+def detect_penny_stocks(threshold=5.0):
+    penny = []
+    for sym in random.sample(TICKERS, min(100, len(TICKERS))):
+        try:
+            price = yf.Ticker(sym).info.get("regularMarketPrice", 100)
+            if price is not None and price < threshold:
+                penny.append({"symbol": sym, "price": price})
+        except:
+            continue
+    return penny
 
-def pick_best_options(symbol):
-    try:
-        tk = yf.Ticker(symbol)
-        spot = get_price(symbol)
-        expiry_list = tk.options
-        best = []
-        for expiry in expiry_list[:2]:
-            chain = tk.option_chain(expiry)
-            for side, df in [('call', chain.calls), ('put', chain.puts)]:
-                df = df[df['openInterest'] > 20]
-                for _, opt in df.iterrows():
-                    if side == 'call' and opt['strike'] > spot:
-                        est_return = (opt['strike'] - spot) / opt['lastPrice'] if opt['lastPrice'] > 0 else None
-                    elif side == 'put' and opt['strike'] < spot:
-                        est_return = (spot - opt['strike']) / opt['lastPrice'] if opt['lastPrice'] > 0 else None
-                    else:
-                        est_return = None
-                    if est_return and est_return > 1:
-                        best.append({
-                            "type": side,
-                            "expiry": expiry,
-                            "strike": opt['strike'],
-                            "lastPrice": opt['lastPrice'],
-                            "bid": opt['bid'],
-                            "ask": opt['ask'],
-                            "openInterest": opt['openInterest'],
-                            "impliedVolatility": opt['impliedVolatility'],
-                            "est_return": round(est_return,2)
-                        })
-        picks = sorted(best, key=lambda x: -x['est_return'])[:5]
-        log_event("pick_best_options", {"symbol": symbol, "options": picks})
-        return picks
-    except Exception as e:
-        return [{"error": str(e)}]
-
-# ------------------- PENNY STOCK / PUMP DETECTOR ---------
-
-def detect_penny_stocks():
-    picks = []
-    for symbol in TICKERS[:300]:
-        price = get_price(symbol)
-        if price and price < 1:
-            picks.append(symbol)
-    log_event("detect_penny_stocks", {"results": picks})
-    return picks
-
-# ------------------- WATCHLIST ---------------------------
-
-def add_watchlist(user_id, symbol):
-    supabase.table("watchlist").insert({
-        "user_id": user_id,
-        "symbol": symbol,
-        "added": datetime.utcnow().isoformat()
+def log_prediction(symbol, predicted_price, action="buy"):
+    now = datetime.utcnow().isoformat()
+    supabase.table("prediction_log").insert({
+        "ticker": symbol,
+        "predicted_price": predicted_price,
+        "timestamp": now,
+        "action": action
     }).execute()
-    log_event("add_watchlist", {"user_id": user_id, "symbol": symbol})
 
-def get_watchlist(user_id):
-    res = supabase.table("watchlist").select("symbol").eq("user_id", user_id).execute()
-    log_event("get_watchlist", {"user_id": user_id})
-    return [r['symbol'] for r in res.data] if res.data else []
+def update_prediction_outcomes():
+    logs = supabase.table("prediction_log").select("*").is_("actual_price", None).execute().data
+    for entry in logs:
+        ticker = entry["ticker"]
+        pred_time = datetime.fromisoformat(entry["timestamp"])
+        check_time = pred_time + timedelta(days=2)
+        if datetime.utcnow() < check_time:
+            continue
+        try:
+            tk = yf.Ticker(ticker)
+            df = tk.history(start=pred_time.date(), end=check_time.date())
+            if len(df) < 2:
+                continue
+            actual = float(df['Close'][-1])
+            predicted = entry["predicted_price"]
+            action = entry.get("action", "buy")
+            win = "win" if (actual >= predicted and action == "buy") or (actual <= predicted and action == "sell") else "loss"
+            supabase.table("prediction_log").update({
+                "actual_price": actual,
+                "outcome": win
+            }).eq("id", entry["id"]).execute()
+        except Exception as e:
+            logger.warning(f"Backfill error for {ticker}: {e}")
 
-# ------------------- SEARCH -----------------------------
-
-def search_tickers(query):
-    found = [s for s in TICKERS if query.upper() in s]
-    log_event("search_tickers", {"query": query, "results": found})
-    return found
-
-# ------------------- FASTAPI ROUTES ---------------------
-
+# API ROUTES
 @app.get("/recommendations/top")
-def top_recommendations():
-    recs = get_stock_recommendations()
-    return {"buy_now": recs}
+def recommendations():
+    return get_top_recommendations(n=10)
 
-@app.get("/options/best")
-def best_options(symbol: str = Query(..., description="Stock symbol (e.g. TSLA)")):
-    picks = pick_best_options(symbol)
-    return {"symbol": symbol, "best_options": picks}
-
-@app.get("/tickers")
-def all_tickers():
-    return {"tickers": TICKERS}
+@app.get("/options/top")
+def options():
+    return get_options_top(n=10)
 
 @app.get("/historic")
-def get_hist(symbol: str, period: str = "1y"):
-    hist = get_history(symbol, period)
-    return {"symbol": symbol, "history": hist}
+def historic():
+    data = []
+    for sym in random.sample(TICKERS, 5):
+        try:
+            df = yf.Ticker(sym).history(period="1mo")
+            if df.empty: continue
+            closes = df['Close'].tolist()
+            data.append({"symbol": sym, "history": closes})
+        except:
+            continue
+    return data
 
 @app.get("/earnings")
-def earnings(symbol: str):
-    data = get_earnings(symbol)
-    return {"symbol": symbol, "earnings": data}
+def earnings():
+    results = []
+    for sym in random.sample(TICKERS, 20):
+        try:
+            cal = yf.Ticker(sym).calendar
+            if not cal.empty:
+                next_earnings = cal.loc["Earnings Date"][0]
+                results.append({"symbol": sym, "earnings": str(next_earnings)})
+        except:
+            continue
+    return results
 
-@app.get("/penny")
-def penny_stocks():
-    picks = detect_penny_stocks()
-    return {"penny_stocks": picks}
-
-@app.get("/watchlist")
-def watchlist(user_id: str):
-    wl = get_watchlist(user_id)
-    return {"user_id": user_id, "watchlist": wl}
-
-@app.post("/watchlist/add")
-def add_to_watchlist(user_id: str, symbol: str):
-    add_watchlist(user_id, symbol)
-    return {"message": f"Added {symbol} to watchlist", "user_id": user_id}
-
-@app.get("/search")
-def search(query: str):
-    found = search_tickers(query)
-    return {"results": found}
-
-# ------------------- METRICS/LOGGING/ADMIN ---------------
-
-@app.get("/admin/logs")
-def logs():
-    data = supabase.table("app_log").select("*").order("timestamp", desc=True).limit(100).execute().data
-    return {"logs": data}
+@app.get("/pumps")
+def pump_and_dump():
+    return detect_penny_stocks()
 
 @app.get("/admin/metrics")
 def metrics():
-    logs = supabase.table("app_log").select("*").execute().data
-    return {"log_count": len(logs), "latest": logs[:5]}
+    update_prediction_outcomes()
+    logs = supabase.table("prediction_log").select("*").execute().data
+    total = len(logs)
+    wins = sum(1 for x in logs if x.get("outcome") == "win")
+    return {
+        "total_predictions": total,
+        "wins": wins,
+        "accuracy": round((wins / total) * 100, 2) if total else 0
+    }
 
-# ---------------------------------------------------------
+@app.get("/search")
+def search(q: str):
+    return [s for s in TICKERS if q.upper() in s][:20]
 
-@app.get("/")
-def root():
-    return {"status": "OK", "features": [
-        "buy now recommendations", "options picker", "historic data", "earnings", "penny detector",
-        "watchlist", "search", "logging/metrics"
-    ]}
+@app.post("/watchlist/add")
+def add_watch(req: WatchlistRequest):
+    supabase.table("watchlist").insert({
+        "user_id": req.user_id,
+        "symbol": req.symbol
+    }).execute()
+    return {"message": "added"}
+
+@app.get("/watchlist/get")
+def get_watch(user_id: str):
+    results = supabase.table("watchlist").select("*").eq("user_id", user_id).execute().data
+    return results
+
+@app.get("/admin")
+def admin_view():
+    logs = supabase.table("prediction_log").select("*").order("timestamp", desc=True).limit(50).execute().data
+    return logs
+
+@app.get("/buynow")
+def quick_wins():
+    picks = get_top_recommendations(n=20)
+    return [x for x in picks if x['score'] > 5][:10]
