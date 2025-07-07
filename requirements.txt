@@ -7,5 +7,4 @@ joblib
 xgboost
 numpy
 pandas
-fastapi-supabase-auth
 websockets
