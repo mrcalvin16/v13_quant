@@ -17,10 +17,10 @@ supabase = create_client(url, key)
 
 app = FastAPI()
 
-# Load tickers
+# Load tickers (no "data/" prefix)
 def load_tickers():
-    nyse = pd.read_csv("data/nyse-listed.csv")
-    other = pd.read_csv("data/other-listed.csv")
+    nyse = pd.read_csv("nyse-listed.csv")
+    other = pd.read_csv("other-listed.csv")
     nyse_symbols = nyse["Symbol"].dropna().unique().tolist()
     other_symbols = other["Symbol"].dropna().unique().tolist()
     return sorted(set(nyse_symbols + other_symbols))
