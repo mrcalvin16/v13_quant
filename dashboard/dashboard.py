@@ -1,141 +1,82 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime
+import plotly.express as px
 
-API_BASE = "https://v13-quant.onrender.com"
+BACKEND_URL = "https://v13-quant.onrender.com"
 
-# Tabs in sidebar
-tabs = st.sidebar.radio(
-    "Go to",
-    [
-        "Buy These Now",
-        "Watchlist",
-        "Ticker Search",
-        "Pump & Dump Alerts",
-        "Penny Stocks",
-        "Earnings Calendar",
-        "Historic Data",
-        "Admin Dashboard"
-    ]
-)
+st.set_page_config(layout="wide")
+st.title("Oracle Black ULTRA Dashboard")
 
-# ---- LOAD TICKERS ----
-@st.cache_data
-def get_tickers():
-    try:
-        return requests.get(f"{API_BASE}/tickers").json()
-    except Exception:
-        return []
-tickers = get_tickers()
+tabs = st.tabs(["Buy Now", "Options", "Earnings", "Historic Data", "Search", "Pump & Dumps", "Admin"])
 
-# ---- BUY THESE NOW ----
-if tabs == "Buy These Now":
-    st.title("🔥 Buy These Now!")
-    st.write("AI-Recommended Stocks to Buy Right Now.")
-    try:
-        top = requests.get(f"{API_BASE}/recommendations/top").json()
-        df = pd.DataFrame(top)
-        st.dataframe(df[["ticker", "combined_score", "pred_price"]])
-        st.bar_chart(df.set_index("ticker")["combined_score"])
-    except Exception as e:
-        st.error(f"Error loading recommendations: {e}")
+with tabs[0]:
+    st.header("Buy These NOW (Predictions)")
+    res = requests.get(f"{BACKEND_URL}/recommendations/top")
+    if res.ok:
+        top = pd.DataFrame(res.json())
+        st.dataframe(top)
+        if not top.empty:
+            st.write("### Highest Confidence Buy Now:")
+            st.write(top[["ticker", "combined_score", "predicted_price"]].head(5))
+        fig = px.bar(top, x="ticker", y="combined_score", title="Top Picks")
+        st.plotly_chart(fig, use_container_width=True)
 
-# ---- WATCHLIST ----
-elif tabs == "Watchlist":
-    st.title("👀 My Watchlist")
-    st.write("Save your favorite stocks here for quick access.")
-    if "watchlist" not in st.session_state:
-        st.session_state.watchlist = []
-    add_ticker = st.selectbox("Add ticker to Watchlist", [""] + tickers)
-    if st.button("Add to Watchlist") and add_ticker and add_ticker not in st.session_state.watchlist:
-        st.session_state.watchlist.append(add_ticker)
-    remove_ticker = st.selectbox("Remove ticker from Watchlist", [""] + st.session_state.watchlist)
-    if st.button("Remove from Watchlist") and remove_ticker in st.session_state.watchlist:
-        st.session_state.watchlist.remove(remove_ticker)
-    st.write("**Your Watchlist:**")
-    for ticker in st.session_state.watchlist:
-        st.write(f"- {ticker}")
-
-# ---- TICKER SEARCH ----
-elif tabs == "Ticker Search":
-    st.title("🔍 Ticker Search")
-    ticker = st.selectbox("Choose a Ticker", tickers)
+with tabs[1]:
+    st.header("Options Chains")
+    ticker = st.text_input("Ticker for options", "")
     if ticker:
-        try:
-            res = requests.get(f"{API_BASE}/recommendation/{ticker}").json()
-            st.json(res)
-            st.write("Combined Score:", res.get("combined_score"))
-            st.write("Predicted Price:", res.get("pred_price"))
-        except Exception as e:
-            st.error(f"Error: {e}")
-
-# ---- PUMP & DUMP ALERTS ----
-elif tabs == "Pump & Dump Alerts":
-    st.title("🚨 Pump & Dump Radar")
-    try:
-        signals = requests.get(f"{API_BASE}/signals").json()
-        df = pd.DataFrame(signals)
-        if not df.empty:
-            pump_df = df[(df["confidence"] > 0.85) | (df.get("combined_score", pd.Series([0])) > 0.8)]
-            st.write("⚡️ Potential Pump & Dumps (high risk, high reward):")
-            st.dataframe(pump_df[["ticker", "action", "confidence", "combined_score", "timestamp"]])
+        res = requests.get(f"{BACKEND_URL}/options/{ticker}")
+        if res.ok:
+            df = pd.DataFrame(res.json())
+            st.dataframe(df)
         else:
-            st.info("No suspicious activity found.")
-    except Exception as e:
-        st.error(f"Error loading signals: {e}")
+            st.warning("No options found.")
 
-# ---- PENNY STOCKS RADAR ----
-elif tabs == "Penny Stocks":
-    st.title("💸 Penny Stocks Radar")
-    penny_list = []
-    for ticker in tickers[:100]:  # Limit for demo
-        try:
-            res = requests.get(f"{API_BASE}/recommendation/{ticker}").json()
-            price = float(res.get("pred_price", 0))
-            if 0 < price <= 5:
-                penny_list.append({
-                    "Ticker": ticker,
-                    "Predicted Price": price,
-                    "Score": res.get("combined_score"),
-                })
-        except Exception:
-            pass
-    penny_df = pd.DataFrame(penny_list)
-    if not penny_df.empty:
-        st.dataframe(penny_df)
-    else:
-        st.info("No penny stocks detected in top 100 tickers right now.")
-
-# ---- EARNINGS CALENDAR ----
-elif tabs == "Earnings Calendar":
-    st.title("📅 Earnings Calendar")
-    ticker = st.selectbox("Choose Ticker for Earnings", tickers)
+with tabs[2]:
+    st.header("Upcoming Earnings")
+    ticker = st.text_input("Ticker for earnings", "")
     if ticker:
-        try:
-            res = requests.get(f"{API_BASE}/earnings/{ticker}").json()
-            st.write(f"Next earnings date for {ticker}: {res.get('next_earnings')}")
-        except Exception as e:
-            st.error(f"Error loading earnings: {e}")
+        res = requests.get(f"{BACKEND_URL}/earnings/{ticker}")
+        st.write(res.json())
 
-# ---- HISTORIC DATA ----
-elif tabs == "Historic Data":
-    st.title("📈 Historic Data")
-    ticker = st.selectbox("Choose Ticker for Historic Data", tickers)
+with tabs[3]:
+    st.header("Historic Data")
+    ticker = st.text_input("Ticker for history", "")
     if ticker:
-        try:
-            hist = requests.get(f"{API_BASE}/ticker/{ticker}/history").json()
-            df = pd.DataFrame(hist)
-            st.line_chart(df.set_index("date")["close"])
-        except Exception as e:
-            st.error(f"Error loading historic data: {e}")
+        import yfinance as yf
+        tk = yf.Ticker(ticker)
+        df = tk.history(period="1y")
+        st.line_chart(df["Close"])
 
-# ---- ADMIN DASHBOARD ----
-elif tabs == "Admin Dashboard":
-    st.title("🛠️ Admin Dashboard")
-    st.write("Monitor AI performance, model updates, and logs here.")
-    try:
-        logs = requests.get(f"{API_BASE}/admin/logs").json()
-        st.json(logs)
-    except Exception as e:
-        st.warning("No logs found or admin endpoint not implemented.")
+with tabs[4]:
+    st.header("Search Stocks")
+    tickers = requests.get(f"{BACKEND_URL}/tickers").json()
+    search = st.text_input("Search by symbol")
+    if search:
+        result = [t for t in tickers if search.upper() in t]
+        st.write(result)
+
+with tabs[5]:
+    st.header("Pump & Dumps / Penny Stocks Detector")
+    if st.button("Scan for pump & dumps / penny stocks"):
+        flagged = requests.get(f"{BACKEND_URL}/pumpdumps").json()
+        st.dataframe(pd.DataFrame(flagged))
+        st.write(f"Total flagged: {len(flagged)}")
+
+with tabs[6]:
+    st.header("Admin: Logs, Metrics, Training")
+    metrics = requests.get(f"{BACKEND_URL}/admin/metrics").json()
+    st.metric("Win Rate", f"{metrics.get('win_rate', 0)*100:.2f}%")
+    st.metric("Avg. Confidence", f"{metrics.get('avg_confidence', 0):.2f}")
+    st.metric("Flagged", metrics.get("flagged_count", 0))
+    st.write("Current Weights:", metrics.get("weights"))
+    logs = requests.get(f"{BACKEND_URL}/admin/logs").json()
+    st.write("Recent Events:")
+    st.dataframe(pd.DataFrame(logs))
+    bad_id = st.number_input("Flag bad prediction by ID", min_value=0, step=1)
+    if st.button("Flag"):
+        resp = requests.post(f"{BACKEND_URL}/admin/flag", json={"prediction_id": bad_id})
+        st.success(f"Flagged {bad_id}: {resp.text}")
+
+st.info("Oracle Black ULTRA - Live, Self-Learning, Pump & Dump-Aware Prediction & Monitoring")
