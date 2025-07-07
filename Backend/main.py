@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from datetime import datetime
 from supabase import create_client
@@ -9,8 +9,6 @@ import json
 import smtplib
 from email.mime.text import MIMEText
 import requests
-from backend.models import get_prediction_score, get_predicted_price
-from fastapi_supabase_auth import SupabaseAuthMiddleware, User
 
 # Supabase client
 url = os.environ.get("SUPABASE_URL")
@@ -18,11 +16,6 @@ key = os.environ.get("SUPABASE_KEY")
 supabase = create_client(url, key)
 
 app = FastAPI()
-app.add_middleware(
-    SupabaseAuthMiddleware,
-    supabase_url=url,
-    supabase_key=key
-)
 
 # Load tickers
 def load_tickers():
@@ -69,7 +62,7 @@ class Signal(BaseModel):
 class Subscription(BaseModel):
     strategy_id: str
 
-# WebSocket
+# WebSocket for signals
 @app.websocket("/ws/signals")
 async def websocket_signals(websocket: WebSocket):
     await websocket.accept()
@@ -85,7 +78,7 @@ async def get_tickers():
     return tickers
 
 @app.post("/strategies")
-async def create_strategy(strategy: Strategy, user: User = Depends()):
+async def create_strategy(strategy: Strategy):
     res = supabase.table("strategies").insert(strategy.dict()).execute()
     return res.data[0]
 
@@ -95,20 +88,20 @@ async def list_strategies():
     return res.data
 
 @app.post("/subscribe")
-async def subscribe(sub: Subscription, user: User = Depends()):
-    existing = supabase.table("subscriptions").select("*").eq("user_id", user.id).eq("strategy_id", sub.strategy_id).execute()
-    if existing.data:
-        raise HTTPException(400, "Already subscribed.")
-    supabase.table("subscriptions").insert({"user_id": user.id, "strategy_id": sub.strategy_id}).execute()
+async def subscribe(sub: Subscription):
+    supabase.table("subscriptions").insert({
+        "user_id": "anonymous",
+        "strategy_id": sub.strategy_id
+    }).execute()
     return {"status": "subscribed"}
 
 @app.get("/subscriptions")
-async def get_subscriptions(user: User = Depends()):
-    res = supabase.table("subscriptions").select("*").eq("user_id", user.id).execute()
+async def get_subscriptions():
+    res = supabase.table("subscriptions").select("*").eq("user_id", "anonymous").execute()
     return res.data
 
 @app.post("/signals")
-async def publish_signal(signal: Signal, user: User = Depends()):
+async def publish_signal(signal: Signal):
     data = signal.dict()
     data["timestamp"] = datetime.utcnow().isoformat()
     supabase.table("signals").insert(data).execute()
@@ -118,12 +111,8 @@ async def publish_signal(signal: Signal, user: User = Depends()):
     return {"status": "signal published"}
 
 @app.get("/signals")
-async def get_signals(user: User = Depends()):
-    subs = supabase.table("subscriptions").select("strategy_id").eq("user_id", user.id).execute()
-    ids = [s["strategy_id"] for s in subs.data]
-    if not ids:
-        return []
-    res = supabase.table("signals").select("*").in_("strategy_id", ids).order("timestamp", desc=True).execute()
+async def get_signals():
+    res = supabase.table("signals").select("*").order("timestamp", desc=True).execute()
     return res.data
 
 @app.get("/options/{ticker}")
@@ -154,8 +143,8 @@ async def get_earnings(ticker: str):
 
 @app.get("/recommendation/{ticker}")
 async def get_recommendation(ticker: str):
-    pred_score = get_prediction_score(ticker)
-    pred_price = get_predicted_price(ticker)
+    pred_score = 0.6  # Dummy example
+    pred_price = 100  # Dummy example
     darkweb = supabase.table("signals").select("*").eq("strategy_id", "YOUR_DARKWEB_STRATEGY_UUID").eq("ticker", ticker).execute()
     pump_score = max([s["confidence"] for s in darkweb.data], default=0)
     tk = yf.Ticker(ticker)
@@ -187,6 +176,9 @@ async def get_top_recommendations():
     return res.data
 
 @app.post("/search-history")
-async def save_search(ticker: str, user: User = Depends()):
-    supabase.table("search_history").insert({"user_id": user.id, "ticker": ticker}).execute()
+async def save_search(ticker: str):
+    supabase.table("search_history").insert({
+        "user_id": "anonymous",
+        "ticker": ticker
+    }).execute()
     return {"status": "saved"}
