@@ -6,8 +6,9 @@ import os
 import yfinance as yf
 import pandas as pd
 import json
+import math
 
-# Supabase client
+# Supabase client setup
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
 supabase = create_client(url, key)
@@ -24,7 +25,8 @@ def load_tickers():
 
     def get_symbols(df):
         for col in [
-            "ACT Symbol", "CQS Symbol", "NASDAQ Symbol", "Symbol", "symbol", "Ticker", "ticker"
+            "ACT Symbol", "CQS Symbol", "NASDAQ Symbol",
+            "Symbol", "symbol", "Ticker", "ticker"
         ]:
             if col in df.columns:
                 return df[col].dropna().unique().tolist()
@@ -66,37 +68,56 @@ def get_recommendation(ticker: str):
     pred_score = 0.6  # Example dummy score
     pred_price = 100  # Example dummy price
 
-    # Use your darkweb strategy UUID
-    darkweb_strategy_id = "fd4f6249-0769-4d89-8322-3789fccf7a5a"
-    darkweb = supabase.table("signals").select("*")\
-        .eq("strategy_id", darkweb_strategy_id)\
-        .eq("ticker", ticker).execute()
+    # Replace this with your actual darkweb strategy UUID from SQL
+    darkweb_strategy_uuid = "fd4f6249-0769-4d89-8322-3789fccf7a5a"
 
-    pump_score = max([s["confidence"] for s in darkweb.data], default=0)
+    darkweb = supabase.table("signals").select("*").eq("strategy_id", darkweb_strategy_uuid).eq("ticker", ticker).execute()
+    pump_score = max([s["confidence"] for s in (darkweb.data or [])], default=0)
+
     tk = yf.Ticker(ticker)
     cal = tk.calendar
-    earnings_score = 0.5 if not cal.empty else 0
-    expirations = tk.options
-    if expirations:
-        chain = tk.option_chain(expirations[0])
-        calls = chain.calls
-        opt_score = calls.impliedVolatility.mean() / 2
+
+    # Robust earnings_score check for dict/dataframe/empty
+    if isinstance(cal, dict) or cal is None or (hasattr(cal, 'empty') and cal.empty):
+        earnings_score = 0
     else:
-        opt_score = 0
+        earnings_score = 0.5
+
+    expirations = tk.options
+    opt_score = 0
+    if expirations:
+        try:
+            chain = tk.option_chain(expirations[0])
+            calls = chain.calls
+            iv_mean = calls.impliedVolatility.fillna(0).mean()
+            opt_score = iv_mean / 2 if not math.isnan(iv_mean) else 0
+        except Exception:
+            opt_score = 0
+
+    # Helper to clean float values for JSON
+    def clean_float(val):
+        try:
+            if val is None or math.isnan(val) or math.isinf(val):
+                return 0.0
+            return float(val)
+        except Exception:
+            return 0.0
+
     combined = (
         0.4 * pred_score +
         0.2 * pump_score +
         0.2 * earnings_score +
         0.2 * opt_score
     )
+
     return {
         "ticker": ticker,
-        "pred_score": pred_score,
-        "pump_score": pump_score,
-        "earnings_score": earnings_score,
-        "opt_score": opt_score,
-        "combined_score": combined,
-        "pred_price": pred_price
+        "pred_score": clean_float(pred_score),
+        "pump_score": clean_float(pump_score),
+        "earnings_score": clean_float(earnings_score),
+        "opt_score": clean_float(opt_score),
+        "combined_score": clean_float(combined),
+        "pred_price": clean_float(pred_price)
     }
 
 @app.get("/recommendations/top")
@@ -118,25 +139,34 @@ def get_options(ticker: str):
     exps = tk.options
     all_chains = []
     for exp in exps[:2]:
-        chain = tk.option_chain(exp)
-        calls = chain.calls
-        puts = chain.puts
-        calls["type"] = "call"
-        puts["type"] = "put"
-        calls["expiration"] = exp
-        puts["expiration"] = exp
-        all_chains.extend([calls, puts])
-    df = pd.concat(all_chains).reset_index(drop=True)
-    return df.to_dict(orient="records")
+        try:
+            chain = tk.option_chain(exp)
+            calls = chain.calls.fillna(0)
+            puts = chain.puts.fillna(0)
+            calls["type"] = "call"
+            puts["type"] = "put"
+            calls["expiration"] = exp
+            puts["expiration"] = exp
+            all_chains.extend([calls, puts])
+        except Exception:
+            continue
+    if all_chains:
+        df = pd.concat(all_chains).reset_index(drop=True)
+        df = df.fillna(0)
+        return df.to_dict(orient="records")
+    return []
 
 @app.get("/earnings/{ticker}")
 def get_earnings(ticker: str):
     tk = yf.Ticker(ticker)
     cal = tk.calendar
-    if cal.empty:
+    if isinstance(cal, dict) or cal is None or (hasattr(cal, 'empty') and cal.empty):
         return {"next_earnings": None}
-    next_earnings = cal.loc["Earnings Date"][0]
-    return {"next_earnings": str(next_earnings)}
+    try:
+        next_earnings = cal.loc["Earnings Date"][0]
+        return {"next_earnings": str(next_earnings)}
+    except Exception:
+        return {"next_earnings": None}
 
 @app.get("/strategies")
 def list_strategies():
