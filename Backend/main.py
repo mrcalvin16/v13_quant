@@ -17,7 +17,7 @@ supabase = create_client(url, key)
 
 app = FastAPI()
 
-# Load tickers with auto-detect column logic
+# Load tickers with robust detection
 def load_tickers():
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     nyse_path = os.path.join(base_dir, "nyse-listed.csv")
@@ -25,12 +25,20 @@ def load_tickers():
     nyse = pd.read_csv(nyse_path)
     other = pd.read_csv(other_path)
 
-    # Show columns in logs for debugging
     print("NYSE Columns:", nyse.columns)
     print("Other Columns:", other.columns)
 
     def get_symbols(df):
-        for col in ["Symbol", "symbol", "Ticker", "ticker"]:
+        # Try most likely column names
+        for col in [
+            "ACT Symbol",
+            "CQS Symbol",
+            "NASDAQ Symbol",
+            "Symbol",
+            "symbol",
+            "Ticker",
+            "ticker",
+        ]:
             if col in df.columns:
                 return df[col].dropna().unique().tolist()
         raise ValueError("No ticker column found in CSV.")
